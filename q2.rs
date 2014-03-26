@@ -11,7 +11,7 @@ mod remotecontrol;
 fn main() {
     let (mut session, session_tx, session_rx) = session::Session::new();
     let network = session::Network::new();
-    session.networks.push(network);
+    session.networks.insert(0, network);
 
     let mut remote = remotecontrol::RemoteControl::new();
     remote.add_session(0, remotecontrol::SessionData { session: Some(session), tx: session_tx, rx: session_rx });

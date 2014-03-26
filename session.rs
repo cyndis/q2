@@ -2,10 +2,10 @@ use irc;
 use irc::client::{Client, ClientMessage};
 use std::io::net::ip::SocketAddr;
 //use buffer::Buffer;
+use collections::HashMap;
 use std;
 
 pub struct Network {
-    id: u64,
     client: Client,
     rx: Receiver<ClientMessage>
 //    buffers: ~[Buffer]
@@ -15,13 +15,12 @@ impl Network {
     pub fn new() -> Network {
         let (cli, rx) = Client::new();
         Network {
-            id: 0, // FIXME
             client: cli,
             rx: rx
         }
     }
 
-    pub fn handle_message(&mut self, tx: &Sender<SessionMessage>) {
+    pub fn handle_message(&mut self, tx: &Sender<SessionMessage>, id: u64) {
         let msg = match self.rx.recv_opt() {
             Some(m) => m,
             None    => return
@@ -45,13 +44,13 @@ impl Network {
             }
         }
 
-        tx.send(NetworkMessage(self.id, msg));
+        tx.send(NetworkMessage(id, msg));
     }
 }
 
 pub struct Session {
     // TODO replace with hashmap
-    networks: ~[Network],
+    networks: HashMap<u64, Network>,
     message_tx: Sender<SessionMessage>,
     command_rx: Receiver<SessionCommand>
 }
@@ -79,38 +78,38 @@ impl Session {
         let (message_tx, message_rx) = channel();
         let (command_tx, command_rx) = channel();
         (Session {
-            networks: ~[],
+            networks: HashMap::new(),
             message_tx: message_tx,
             command_rx: command_rx
          }, command_tx, message_rx)
     }
 
     pub fn run(&mut self) {
-        enum MessageSource { FromNetwork(uint), FromRemote };
+        enum MessageSource { FromNetwork(u64), FromRemote };
         loop {
             let source = {
                 let sel = std::comm::Select::new();
                 let mut handles = std::vec::with_capacity(self.networks.len());
-                for network in self.networks.iter() {
+                for (&id, network) in self.networks.iter() {
                     let handle = sel.handle(&network.rx);
-                    handles.push(handle);
+                    handles.push((handle, id));
                 }
                 let mut cmd_handle = sel.handle(&self.command_rx);
                 unsafe { cmd_handle.add(); }
-                for handle in handles.mut_iter() {
+                for &(ref mut handle, _) in handles.mut_iter() {
                     unsafe { handle.add(); }
                 }
                 let ready_id = sel.wait();
                 if cmd_handle.id() == ready_id {
                     FromRemote
                 } else {
-                    FromNetwork(handles.iter().position(|handle| handle.id() == ready_id).unwrap())
+                    FromNetwork(handles.iter().find(|& &(ref handle,_)| handle.id() == ready_id).map(|&(_, id)| id).unwrap())
                 }
             };
 
             match source {
                 FromRemote => self.handle_command(),
-                FromNetwork(i) => self.networks[i].handle_message(&self.message_tx)
+                FromNetwork(i) => self.networks.get_mut(&i).handle_message(&self.message_tx, i)
             }
         }
     }
@@ -121,13 +120,14 @@ impl Session {
             None    => return
         };
 
+        // FIXME don't use get_mut! can fail!
         match msg {
-            NwConnect(net, target) => self.networks[net].client.connect(target),
-            NwRegister(net, nickname) => self.networks[net].client.register(nickname, nickname, nickname),
-            NwJoinChannel(net, target) => self.networks[net].client.join(target),
-            NwSendPrivmsg(net, target, message) => self.networks[net].client.privmsg(target, message),
+            NwConnect(net, target) => self.networks.get_mut(&net).client.connect(target),
+            NwRegister(net, nickname) => self.networks.get_mut(&net).client.register(nickname, nickname, nickname),
+            NwJoinChannel(net, target) => self.networks.get_mut(&net).client.join(target),
+            NwSendPrivmsg(net, target, message) => self.networks.get_mut(&net).client.privmsg(target, message),
             GetNetworkList(tag) => {
-                let net_list = self.networks.iter().map(|net| NetworkData { id: net.id }).collect();
+                let net_list = self.networks.iter().map(|(id, _net)| NetworkData { id: *id }).collect();
                 self.message_tx.send(NetworkList(tag, net_list));
             }
         }
