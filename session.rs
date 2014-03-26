@@ -60,11 +60,18 @@ pub enum SessionCommand {
     NwConnect(u64, SocketAddr),
     NwRegister(u64, ~[u8]),
     NwJoinChannel(u64, ~[u8]),
-    NwSendPrivmsg(u64, ~[u8], ~[u8])
+    NwSendPrivmsg(u64, ~[u8], ~[u8]),
+
+    GetNetworkList(u64 /* tag */)
+}
+
+pub struct NetworkData {
+    id: u64
 }
 
 pub enum SessionMessage {
-    NetworkMessage(u64, ClientMessage)
+    NetworkMessage(u64, ClientMessage),
+    NetworkList(u64, ~[NetworkData])
 }
 
 impl Session {
@@ -118,7 +125,11 @@ impl Session {
             NwConnect(net, target) => self.networks[net].client.connect(target),
             NwRegister(net, nickname) => self.networks[net].client.register(nickname, nickname, nickname),
             NwJoinChannel(net, target) => self.networks[net].client.join(target),
-            NwSendPrivmsg(net, target, message) => self.networks[net].client.privmsg(target, message)
+            NwSendPrivmsg(net, target, message) => self.networks[net].client.privmsg(target, message),
+            GetNetworkList(tag) => {
+                let net_list = self.networks.iter().map(|net| NetworkData { id: net.id }).collect();
+                self.message_tx.send(NetworkList(tag, net_list));
+            }
         }
     }
 }
