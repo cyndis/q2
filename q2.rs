@@ -25,5 +25,5 @@ fn main() {
     remote.add_session(0, remotecontrol::SessionData { session: Some(session), tx: session_tx, rx: session_rx });
 
     remote.run();
-    remote.listen(from_str("127.0.0.1:9006").unwrap());
+    remote.listen(from_str("0.0.0.0:9006").unwrap());
 }

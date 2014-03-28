@@ -2,28 +2,38 @@ use irc;
 use irc::client::{Client, ClientMessage};
 use std::io::net::ip::SocketAddr;
 use std;
-use encoding::Encoding;
+use encoding::{Encoding, IrcEncoding};
 use buffer;
 
 pub struct EncodingPolicy {
     network: Encoding,
-    outgoing: Encoding
+    outgoing: Encoding,
+    incoming: Encoding
 }
 
 impl std::default::Default for EncodingPolicy {
     fn default() -> EncodingPolicy {
         EncodingPolicy {
             network: Encoding::new(),
-            outgoing: Encoding::new()
+            outgoing: Encoding::new(),
+            incoming: Encoding::new()
         }
     }
+}
+
+pub enum State {
+    NetworkDisconnected,
+    NetworkConnecting,
+    NetworkConnected
 }
 
 pub struct Network {
     client: Client,
     rx: Receiver<ClientMessage>,
     encoding: EncodingPolicy,
-    buffers: ~[buffer::Buffer]
+    buffers: ~[buffer::Buffer],
+    state: State,
+    nickname: Option<~[u8]>
 }
 
 impl Network {
@@ -33,7 +43,9 @@ impl Network {
             client: cli,
             rx: rx,
             encoding: std::default::Default::default(),
-            buffers: ~[]
+            buffers: ~[],
+            state: NetworkDisconnected,
+            nickname: None
         }
     }
 
@@ -51,16 +63,38 @@ impl Network {
                 let (cli, rx) = Client::new();
                 self.client = cli;
                 self.rx = rx;
+                self.state = NetworkDisconnected;
                 reply(Disconnected(err.desc.to_owned()))
             },
-            irc::client::Message(ref msg) => {
-                match *msg {
+            irc::client::Message(msg) => {
+                match msg {
                     irc::parser::Ping(ref sender) => self.client.pong(*sender),
                     irc::parser::Welcome(_) => {
+                        self.state = NetworkConnected;
                         reply(Connected);
                         self.reply_buffer(reply, buffer::Status,
                                           buffer::Information(~"Welcome to IRC!"));
                     },
+                    irc::parser::Join(who, channel) => {
+                        let channel_l = self.encoding.network.decode(channel.irc_lowercase());
+                        let who = self.encoding.network.decode(who);
+                        self.reply_buffer(reply,
+                                buffer::Channel(channel_l),
+                                buffer::Join(who));
+                    },
+                    irc::parser::Privmsg(who, target, msg) => {
+                        if target.irc_equal(self.nickname.get_ref()) {
+                            let who_l = self.encoding.network.decode(who.irc_lowercase());
+                            let who = self.encoding.network.decode(who);
+                            let msg = self.encoding.incoming.decode(msg);
+                            self.reply_buffer(reply, buffer::Query(who_l), buffer::Message(who, msg));
+                        } else {
+                            let target_l = self.encoding.network.decode(target.irc_lowercase());
+                            let who = self.encoding.network.decode(who);
+                            let msg = self.encoding.incoming.decode(msg);
+                            self.reply_buffer(reply, buffer::Channel(target_l), buffer::Message(who, msg));
+                        }
+                    }
                     _ => ()
                 }
             }
@@ -73,9 +107,11 @@ impl Network {
 
         match cmd {
             Connect(addr) => {
+                self.state = NetworkConnecting;
                 client.connect(addr);
             },
             Register(nickname) => {
+                self.nickname = Some(en.encode(&nickname));
                 client.register(
                     en.encode(&nickname),
                     en.encode(&nickname),

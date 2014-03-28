@@ -37,7 +37,7 @@ impl RemoteData {
     }
 
     fn write_error(&mut self, error: ~str) {
-        self.write_packet(pack_remote_packet(RmError(error)).val0());
+        //self.write_packet(pack_remote_packet(RmError(error)).val0());
     }
 }
 
@@ -93,11 +93,14 @@ impl RemoteControl {
                 let (remote_tx, remote_rx) = channel();
                 wakeup_tx.send((remote_rx, stream.clone(), tag));
 
+                println!("New client");
+
                 loop {
                     let len = match stream.read_le_u32() {
                         Ok(len) => len,
                         Err(io_err) => fail!("Remote client failed during packet length: {}", io_err)
                     };
+                    println!("Remote waiting for packet of length {}", len);
                     // TODO check for too large packets
                     // read_bytes -> read_exact in update
                     let packet = match stream.read_bytes(len as uint) {
@@ -231,9 +234,16 @@ fn parse_remote_packet(packet: ~[u8], tag: u64) -> Option<RemoteCommand> {
     let SC = RcSessionCommand;
     let NC = session::NetworkCommand;
 
-    let mut stream = protobuf::CodedInputStream::new(&mut std::io::MemReader::new(packet));
-    let mut cmd: protocol::RemoteCommand = protobuf::Message::new();
-    cmd.merge_from(&mut stream);
+    //println!("raw {}", packet);
+
+    //let mut rd = std::io::MemReader::new(packet);
+    //println!("eof {}", rd.eof());
+    //let mut stream = protobuf::CodedInputStream::new(&mut rd);
+    let mut cmd: protocol::RemoteCommand = protobuf::parse_from_bytes(packet);
+    //cmd.merge_from(&mut stream);
+
+    //println!("packet_type {:?}", cmd.packet_type);
+    //println!("packet {:?}", cmd);
 
     if cmd.packet_type.is_none() { return None }
     let packet_type = cmd.packet_type.unwrap();
@@ -343,21 +353,35 @@ fn role_to_pbuf(role: buffer::Role) -> protocol::BufferRole {
             }
     }
 }
-
+/*
+fn netstate_to_pbuf(state: network::State) -> protocol::NetworkListT_NetworkState {
+    match state {
+        network::NetworkDisconnected => protocol::NetworkDisconnected,
+        network::NetworkConnecting => protocol::NetworkConnecting,
+        network::NetworkConnected => protocol::NetworkConnected
+    }
+}
+*/
 fn pack_remote_packet(msg: RemoteMessage) -> (~[u8], Option<u64>) {
     let mut pmsg: protocol::RemoteMessage = protobuf::Message::new();
 
     let mut out_tag = None;
 
     match msg {
-        RmError(err) => println!("ignoring client error {}", err),
+        RmError(err) => {
+            pmsg.set_packet_type(protocol::Error);
+            pmsg.set_error(protocol::ErrorT { msg: Some(err) });
+        },
         RmSessionMessage(msg) => {
             match msg {
-                session::NetworkList(nid, data) => {
+                session::NetworkList(tag, data) => {
                     pmsg.set_packet_type(protocol::NetworkList);
-                    pmsg.set_network_id(nid);
-                    for id in data.move_iter() {
-                        pmsg.add_network_list(protocol::NetworkListT { id: Some(id) });
+                    out_tag = Some(tag);
+                    for (id, state) in data.move_iter() {
+                        pmsg.add_network_list(protocol::NetworkListT {
+                            id: Some(id),
+                            //state: Some(netstate_to_pbuf(state))
+                        });
                     }
                 },
                 session::NetworkMessage(nid, msg) => {
@@ -395,6 +419,14 @@ fn pack_remote_packet(msg: RemoteMessage) -> (~[u8], Option<u64>) {
                                 buffer::Information(info) => {
                                     pmsg.set_packet_type(protocol::Information);
                                     pmsg.set_information(protocol::InformationT { msg: Some(info) });
+                                },
+                                buffer::Join(who) => {
+                                    pmsg.set_packet_type(protocol::Join);
+                                    pmsg.set_join(protocol::JoinT { who: Some(who) });
+                                },
+                                buffer::Message(who, msg) => {
+                                    pmsg.set_packet_type(protocol::Privmsg);
+                                    pmsg.set_privmsg(protocol::PrivmsgT { who: Some(who), msg: Some(msg) });
                                 }
                             }
                         }
@@ -404,10 +436,13 @@ fn pack_remote_packet(msg: RemoteMessage) -> (~[u8], Option<u64>) {
         }
     }
 
-    let mut wr = std::io::MemWriter::new();
-    let mut stream = protobuf::CodedOutputStream::new(&mut wr);
-
-    pmsg.write_to(&mut stream);
-
-    (wr.unwrap(), out_tag)
+    if pmsg.is_initialized() {
+        println!("OUT >> {:?}", pmsg);
+        let out_str = pmsg.write_to_bytes();
+        //println!("OUTBUF {}", out_str);
+        (out_str, out_tag)
+    } else {
+        println!("FAIL: output empty");
+        (~[], None)
+    }
 }

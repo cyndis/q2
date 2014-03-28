@@ -1,14 +1,27 @@
 pub enum Message {
     Welcome(~[u8]),
     Ping(~[u8]),
+    Join(~[u8], ~[u8]),
+    Privmsg(~[u8], ~[u8], ~[u8]),
     Unknown(RawMessage)
 }
 
+/* I hate these clones but whatever for now */
 pub fn parse_message(message: &[u8]) -> Option<Message> {
     parse_message_raw(message).and_then(|msg| {
         Some(
-                 if msg.command.as_slice() == bytes!("001") { Welcome(msg.parameters[0]) }
-            else if msg.command.as_slice() == bytes!("PING") { Ping(msg.parameters[0]) }
+                 if msg.command.as_slice() == bytes!("001") {
+                    Welcome(msg.parameters[0])
+                 }
+            else if msg.command.as_slice() == bytes!("PING") {
+                    Ping(msg.parameters[0])
+                 }
+            else if msg.command.as_slice() == bytes!("JOIN") {
+                    Join(msg.prefix.clone().unwrap(), msg.parameters[0])
+                 }
+            else if msg.command.as_slice() == bytes!("PRIVMSG") {
+                    Privmsg(msg.prefix.clone().unwrap(), msg.parameters[0].clone(), msg.parameters[1].clone())
+                 }
             else { Unknown(msg) }
         )
     })

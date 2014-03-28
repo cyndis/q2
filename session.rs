@@ -13,13 +13,9 @@ pub enum SessionCommand {
     GetNetworkList(u64 /* tag */)
 }
 
-pub struct NetworkData {
-    id: u64
-}
-
 pub enum SessionMessage {
     NetworkMessage(u64, network::Message),
-    NetworkList(u64, ~[NetworkData])
+    NetworkList(u64, ~[(u64, network::State)]),
 }
 
 impl Session {
@@ -74,13 +70,14 @@ impl Session {
 
         match msg {
             NetworkCommand(id, cmd) => {
-                match self.networks.find_mut(&id) {
-                    Some(nw) => nw.handle_command(cmd),
+                let &Session { ref mut networks, ref message_tx, .. } = self;
+                match networks.find_mut(&id) {
+                    Some(nw) => nw.handle_command(cmd, |msg| message_tx.send(NetworkMessage(id, msg))),
                     None     => println!("Remote used invalid network id")
                 }
             },
             GetNetworkList(tag) => {
-                let net_list = self.networks.iter().map(|(id, _net)| NetworkData { id: *id }).collect();
+                let net_list = self.networks.iter().map(|(id, net)| (*id, net.state)).collect();
                 self.message_tx.send(NetworkList(tag, net_list));
             }
         }

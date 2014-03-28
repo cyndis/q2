@@ -31,7 +31,9 @@ impl Message {
 
 #[deriving(Clone)]
 pub enum MessageContents {
-    Information(~str)
+    Information(~str),
+    Join(~str), // who
+    Message(~str, ~str) // sender, message
 }
 
 // TODO make this database backed

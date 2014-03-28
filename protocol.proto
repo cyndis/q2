@@ -50,6 +50,7 @@ message SendPrivmsgT {
 message RemoteMessage {
   enum Type {
     /* Remote control */
+    Error = 1;
     /* Session */
     NetworkList = 100;
     /* Network */
@@ -59,6 +60,8 @@ message RemoteMessage {
     NewBuffer = 204;
     /* Buffer */
     Information = 205;
+    Join = 206;
+    Privmsg = 207;
   };
 
   required Type packet_type = 1;
@@ -74,6 +77,9 @@ message RemoteMessage {
   repeated BufferListT buffer_list = 9;
   optional NewBufferT new_buffer = 10;
   optional InformationT information = 11;
+  optional ErrorT error = 12;
+  optional JoinT join = 13;
+  optional PrivmsgT privmsg = 14;
 }
 
 message NetworkListT {
@@ -106,4 +112,17 @@ message NewBufferT {
 
 message InformationT {
   required string msg = 1;
+}
+
+message ErrorT {
+  required string msg = 1;
+}
+
+message JoinT {
+  required string who = 1;
+}
+
+message PrivmsgT {
+  required string who = 1;
+  required string msg = 2;
 }
