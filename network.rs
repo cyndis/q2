@@ -67,7 +67,7 @@ impl Network {
         }
     }
 
-    pub fn handle_command(&mut self, cmd: Command) {
+    pub fn handle_command(&mut self, cmd: Command, reply: |Message|) {
         let &Network { ref mut client, ref encoding, .. } = self;
         let &EncodingPolicy { network: ref en, outgoing: ref eo, .. } = encoding;
 
@@ -87,11 +87,15 @@ impl Network {
             },
             SendPrivmsg(target, message) => {
                 client.privmsg(en.encode(&target), eo.encode(&message));
+            },
+            GetBufferList(tag) => {
+                let data = self.buffers.iter().map(|buf| (buf.id, buf.role.clone())).collect();
+                reply(BufferList(tag, data));
             }
         }
     }
 
-    fn get_buffer<'a>(&'a mut self, role: buffer::Role) -> &'a mut buffer::Buffer {
+    fn get_buffer<'a>(&'a mut self, reply: |Message|, role: buffer::Role) -> &'a mut buffer::Buffer {
         let pos = {
             self.buffers.iter().position(|buffer| buffer.role == role)
         };
@@ -99,6 +103,7 @@ impl Network {
             Some(i) => &mut self.buffers[i],
             None    => {
                 let buf = buffer::Buffer::empty(0 /* FIXME */, role);
+                reply(NewBuffer(buf.id, buf.role.clone()));
                 self.buffers.push(buf);
                 self.buffers.mut_last().unwrap()
             }
@@ -106,7 +111,7 @@ impl Network {
     }
 
     fn reply_buffer(&mut self, reply: |Message|, role: buffer::Role, cont: buffer::MessageContents) {
-        let buffer = self.get_buffer(role);
+        let buffer = self.get_buffer(|x| reply(x), role);
 
         let buf_id = buffer.id;
         buffer.add(buffer::Message::now(cont),
@@ -118,11 +123,14 @@ pub enum Command {
     Connect(SocketAddr),
     Register(~str),
     JoinChannel(~str),
-    SendPrivmsg(~str, ~str)
+    SendPrivmsg(~str, ~str),
+    GetBufferList(u64 /* tag */)
 }
 
 pub enum Message {
     Disconnected(~str),
     Connected,
-    BufferMessage(u64, buffer::Message)
+    NewBuffer(u64, buffer::Role),
+    BufferMessage(u64, buffer::Message),
+    BufferList(u64 /* tag */, ~[(u64, buffer::Role)])
 }

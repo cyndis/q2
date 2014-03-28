@@ -1,6 +1,6 @@
 use time;
 
-#[deriving(Eq)]
+#[deriving(Eq, Clone)]
 pub enum Role {
     Status,
     Channel(~str),

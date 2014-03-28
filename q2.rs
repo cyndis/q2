@@ -1,10 +1,14 @@
 #[allow(deprecated_owned_vector)];
 
+// for protobuf
+#[feature(globs)];
+
 extern crate irc;
 extern crate collections;
 extern crate sync;
 extern crate serialize;
 extern crate time;
+extern crate protobuf;
 
 mod session;
 mod network;

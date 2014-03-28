@@ -4,6 +4,13 @@ use std::io::net::ip::SocketAddr;
 use std::io::net::tcp::{TcpListener, TcpStream};
 use std::io::{Acceptor, Listener};
 use std;
+use protobuf;
+use protobuf::Message;
+use network;
+use session;
+use buffer;
+
+mod protocol;
 
 /*
 tag system:
@@ -218,51 +225,189 @@ impl RemoteControl {
     }
 }
 
-/*
-pub enum SessionCommand {
-    NwConnect(u64, SocketAddr),
-    NwRegister(u64, ~[u8]),
-    NwJoinChannel(u64, ~[u8]),
-    NwSendPrivmsg(u64, ~[u8], ~[u8])
-}
-
-pub enum SessionMessage {
-    NetworkMessage(u64, ClientMessage)
-}
-*/
-
 fn parse_remote_packet(packet: ~[u8], tag: u64) -> Option<RemoteCommand> {
     use session;
 
-    // Temporary
-    // Todo don't unwrap
-    /*
-    let tokens: ~[&str] = std::str::from_utf8(packet).unwrap().split('\n').collect();
-    println!("PARSING TOKS {}", tokens);
-    match tokens.as_slice() {
-        ["attach", n] => {
-            from_str(n).and_then(|n| Some(RcAttachSession(n)))
-        },
-        ["connect", network_id, addr] => {
-            match (from_str(network_id), from_str(addr)) {
-                (Some(network_id), Some(addr)) =>
-                    Some(RcSessionCommand(session::NwConnect(network_id, addr))),
+    let SC = RcSessionCommand;
+    let NC = session::NetworkCommand;
+
+    let mut stream = protobuf::CodedInputStream::new(&mut std::io::MemReader::new(packet));
+    let mut cmd: protocol::RemoteCommand = protobuf::Message::new();
+    cmd.merge_from(&mut stream);
+
+    if cmd.packet_type.is_none() { return None }
+    let packet_type = cmd.packet_type.unwrap();
+
+    match packet_type {
+        protocol::AttachSession => {
+            match cmd.attach_session {
+                Some(protocol::AttachSessionT { session_id: Some(session_id) }) =>
+                    Some(RcAttachSession(session_id)),
                 _ => None
             }
         },
-        ["register", network_id, nickname] => {
-            match (from_str(network_id),) {
-                (Some(network_id),) => Some(RcSessionCommand(session::NwRegister(network_id, nickname.to_owned().into_bytes()))),
+        protocol::GetNetworkList => {
+            Some(RcSessionCommand(session::GetNetworkList(tag)))
+        },
+        protocol::Connect => {
+            match (cmd.network_id, cmd.connect) {
+                (Some(nid), Some(protocol::ConnectT { address: Some(address) })) =>
+                    from_str(address).and_then(|x| Some(SC(NC(nid, network::Connect(x))))),
+                _ => None
+            }
+        },
+        protocol::Register => {
+            match (cmd.network_id, cmd.register) {
+                (Some(nid), Some(protocol::RegisterT { nickname: Some(nickname) })) =>
+                    Some(SC(NC(nid, network::Register(nickname)))),
+                _ => None
+            }
+        },
+        protocol::JoinChannel => {
+            match (cmd.network_id, cmd.join_channel) {
+                (Some(nid), Some(protocol::JoinChannelT { channel: Some(channel) })) =>
+                    Some(SC(NC(nid, network::JoinChannel(channel)))),
+                _ => None
+            }
+        },
+        protocol::SendPrivmsg => {
+            match (cmd.network_id, cmd.send_privmsg) {
+                (Some(nid), Some(protocol::SendPrivmsgT { target: Some(target), msg: Some(msg) })) =>
+                    Some(SC(NC(nid, network::SendPrivmsg(target, msg)))),
+                _ => None
+            }
+        },
+        protocol::GetBufferList => {
+            match cmd.network_id {
+                Some(nid) => Some(SC(NC(nid, network::GetBufferList(tag)))),
                 _ => None
             }
         }
-        _ => None
     }
-    */
+}
 
-    fail!("disabled");
+/*
+pub enum RemoteCommand {
+    RcAttachSession(u64),
+    RcSessionCommand(SessionCommand)
+}
+
+pub enum RemoteMessage {
+    RmError(~str),
+    RmSessionMessage(SessionMessage)
+}
+
+pub enum SessionCommand {
+    NetworkCommand(u64, network::Command),
+    GetNetworkList(u64 tag)
+}
+
+pub enum SessionMessage {
+    NetworkMessage(u64, network::Message),
+    NetworkList(u64, ~[u64])
+}
+
+pub enum Command {
+    Connect(SocketAddr),
+    Register(~str),
+    JoinChannel(~str),
+    SendPrivmsg(~str, ~str),
+    GetBufferList(u64 tag)
+}
+
+pub enum Message {
+    Disconnected(~str),
+    Connected,
+    NewBuffer(u64, buffer::Role),
+    BufferMessage(u64, buffer::Message),
+    BufferList(u64 tag, ~[(u64, buffer::Role)])
+}
+*/
+
+fn role_to_pbuf(role: buffer::Role) -> protocol::BufferRole {
+    match role {
+        buffer::Status =>
+            protocol::BufferRole {
+                buffer_type: Some(protocol::Status),
+                name: Some(~"")
+            },
+        buffer::Channel(n) =>
+            protocol::BufferRole {
+                buffer_type: Some(protocol::Channel),
+                name: Some(n)
+            },
+        buffer::Query(n) =>
+            protocol::BufferRole {
+                buffer_type: Some(protocol::Query),
+                name: Some(n)
+            }
+    }
 }
 
 fn pack_remote_packet(msg: RemoteMessage) -> (~[u8], Option<u64>) {
-    ((~"moi").into_bytes(), None)
+    let mut pmsg: protocol::RemoteMessage = protobuf::Message::new();
+
+    let mut out_tag = None;
+
+    match msg {
+        RmError(err) => println!("ignoring client error {}", err),
+        RmSessionMessage(msg) => {
+            match msg {
+                session::NetworkList(nid, data) => {
+                    pmsg.set_packet_type(protocol::NetworkList);
+                    pmsg.set_network_id(nid);
+                    for id in data.move_iter() {
+                        pmsg.add_network_list(protocol::NetworkListT { id: Some(id) });
+                    }
+                },
+                session::NetworkMessage(nid, msg) => {
+                    pmsg.set_network_id(nid);
+                    match msg {
+                        network::Disconnected(reason) => {
+                            pmsg.set_packet_type(protocol::Disconnected);
+                            pmsg.set_disconnected(protocol::DisconnectedT { reason: Some(reason) });
+                        },
+                        network::Connected => {
+                            pmsg.set_packet_type(protocol::Connected);
+                        },
+                        network::NewBuffer(bufid, role) => {
+                            pmsg.set_packet_type(protocol::NewBuffer);
+                            pmsg.set_new_buffer(protocol::NewBufferT {
+                                id: Some(bufid),
+                                role: Some(role_to_pbuf(role))
+                            });
+                        },
+                        network::BufferList(tag, data) => {
+                            pmsg.set_packet_type(protocol::BufferList);
+                            out_tag = Some(tag);
+                            for (bufid, role) in data.move_iter() {
+                                pmsg.add_buffer_list(protocol::BufferListT {
+                                    id: Some(bufid),
+                                    role: Some(role_to_pbuf(role))
+                                });
+                            }
+                        },
+                        network::BufferMessage(bufid, msg) => {
+                            pmsg.set_buffer_id(bufid);
+                            pmsg.set_message_id(msg.id);
+                            pmsg.set_message_time(msg.time_ns);
+                            match msg.contents {
+                                buffer::Information(info) => {
+                                    pmsg.set_packet_type(protocol::Information);
+                                    pmsg.set_information(protocol::InformationT { msg: Some(info) });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut wr = std::io::MemWriter::new();
+    let mut stream = protobuf::CodedOutputStream::new(&mut wr);
+
+    pmsg.write_to(&mut stream);
+
+    (wr.unwrap(), out_tag)
 }
