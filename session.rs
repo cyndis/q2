@@ -1,66 +1,15 @@
-use irc;
-use irc::client::{Client, ClientMessage};
-use std::io::net::ip::SocketAddr;
-//use buffer::Buffer;
 use collections::HashMap;
 use std;
-
-pub struct Network {
-    client: Client,
-    rx: Receiver<ClientMessage>
-//    buffers: ~[Buffer]
-}
-
-impl Network {
-    pub fn new() -> Network {
-        let (cli, rx) = Client::new();
-        Network {
-            client: cli,
-            rx: rx
-        }
-    }
-
-    pub fn handle_message(&mut self, tx: &Sender<SessionMessage>, id: u64) {
-        let msg = match self.rx.recv_opt() {
-            Some(m) => m,
-            None    => return
-        };
-        println!("{:?}", msg);
-
-        match msg {
-            irc::client::ConnectionError(_) => {
-                // Client has died, make a new one
-                println!("Recreating backing client");
-                let (cli, rx) = Client::new();
-                self.client = cli;
-                self.rx = rx;
-            },
-            irc::client::Message(ref msg) => {
-                match *msg {
-                    irc::parser::Welcome(_) => println!("Welcome to IRC!"),
-                    irc::parser::Ping(ref sender) => self.client.pong(*sender),
-                    _ => ()
-                }
-            }
-        }
-
-        tx.send(NetworkMessage(id, msg));
-    }
-}
+use network;
 
 pub struct Session {
-    // TODO replace with hashmap
-    networks: HashMap<u64, Network>,
+    networks: HashMap<u64, network::Network>,
     message_tx: Sender<SessionMessage>,
     command_rx: Receiver<SessionCommand>
 }
 
 pub enum SessionCommand {
-    NwConnect(u64, SocketAddr),
-    NwRegister(u64, ~[u8]),
-    NwJoinChannel(u64, ~[u8]),
-    NwSendPrivmsg(u64, ~[u8], ~[u8]),
-
+    NetworkCommand(u64, network::Command),
     GetNetworkList(u64 /* tag */)
 }
 
@@ -69,7 +18,7 @@ pub struct NetworkData {
 }
 
 pub enum SessionMessage {
-    NetworkMessage(u64, ClientMessage),
+    NetworkMessage(u64, network::Message),
     NetworkList(u64, ~[NetworkData])
 }
 
@@ -109,7 +58,10 @@ impl Session {
 
             match source {
                 FromRemote => self.handle_command(),
-                FromNetwork(i) => self.networks.get_mut(&i).handle_message(&self.message_tx, i)
+                FromNetwork(i) => {
+                    let &Session { ref mut networks, ref message_tx, .. } = self;
+                    networks.get_mut(&i).handle_message(|msg| message_tx.send(NetworkMessage(i, msg)))
+                }
             }
         }
     }
@@ -120,12 +72,13 @@ impl Session {
             None    => return
         };
 
-        // FIXME don't use get_mut! can fail!
         match msg {
-            NwConnect(net, target) => self.networks.get_mut(&net).client.connect(target),
-            NwRegister(net, nickname) => self.networks.get_mut(&net).client.register(nickname, nickname, nickname),
-            NwJoinChannel(net, target) => self.networks.get_mut(&net).client.join(target),
-            NwSendPrivmsg(net, target, message) => self.networks.get_mut(&net).client.privmsg(target, message),
+            NetworkCommand(id, cmd) => {
+                match self.networks.find_mut(&id) {
+                    Some(nw) => nw.handle_command(cmd),
+                    None     => println!("Remote used invalid network id")
+                }
+            },
             GetNetworkList(tag) => {
                 let net_list = self.networks.iter().map(|(id, _net)| NetworkData { id: *id }).collect();
                 self.message_tx.send(NetworkList(tag, net_list));

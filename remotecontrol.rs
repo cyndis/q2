@@ -236,6 +236,7 @@ fn parse_remote_packet(packet: ~[u8], tag: u64) -> Option<RemoteCommand> {
 
     // Temporary
     // Todo don't unwrap
+    /*
     let tokens: ~[&str] = std::str::from_utf8(packet).unwrap().split('\n').collect();
     println!("PARSING TOKS {}", tokens);
     match tokens.as_slice() {
@@ -257,6 +258,9 @@ fn parse_remote_packet(packet: ~[u8], tag: u64) -> Option<RemoteCommand> {
         }
         _ => None
     }
+    */
+
+    fail!("disabled");
 }
 
 fn pack_remote_packet(msg: RemoteMessage) -> (~[u8], Option<u64>) {
