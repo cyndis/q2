@@ -27,13 +27,20 @@ pub enum State {
     NetworkConnected
 }
 
+pub struct NetworkSettings {
+    server: SocketAddr,
+    nickname: ~str
+}
+
 pub struct Network {
     client: Client,
     rx: Receiver<ClientMessage>,
     encoding: EncodingPolicy,
     buffers: ~[buffer::Buffer],
     state: State,
-    nickname: Option<~[u8]>
+    nickname: Option<~[u8]>, // current nickname
+
+    //settings: Option<NetworkSettings>
 }
 
 impl Network {

@@ -249,7 +249,7 @@ fn parse_remote_packet(packet: ~[u8], tag: u64) -> Option<RemoteCommand> {
     //cmd.merge_from(&mut stream);
 
     //println!("packet_type {:?}", cmd.packet_type);
-    //println!("packet {:?}", cmd);
+    println!("packet {:?}", cmd);
 
     if cmd.packet_type.is_none() { return None }
     let packet_type = cmd.packet_type.unwrap();
