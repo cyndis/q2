@@ -4,6 +4,7 @@ use std::io::net::ip::SocketAddr;
 use std;
 use encoding::{Encoding, IrcEncoding};
 use buffer;
+use envelope::Envelope;
 
 pub struct EncodingPolicy {
     network: Encoding,
@@ -109,11 +110,13 @@ impl Network {
         }
     }
 
-    pub fn handle_command(&mut self, cmd: Command, reply: |Message|) {
+    pub fn handle_command(&mut self, cmd: Envelope<Command>, reply: |Envelope<Message>|) {
         let &Network { ref mut client, ref encoding, ref mut config, .. } = self;
         let &EncodingPolicy { network: ref en, outgoing: ref eo, .. } = encoding;
 
-        match cmd {
+        let bare = cmd.bare();
+
+        match cmd.contents {
             Connect => {
                 match config {
                     &Some(ref config) => {
@@ -134,7 +137,7 @@ impl Network {
             },
             GetBufferList(tag) => {
                 let data = self.buffers.iter().map(|buf| (buf.id, buf.role.clone())).collect();
-                reply(BufferList(tag, data));
+                reply(bare.copy_with(BufferList(tag, data)));
             },
             SetConfiguration(server, nickname) => {
                 *config = Some(Configuration { server: server, nickname: nickname });

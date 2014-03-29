@@ -9,7 +9,7 @@ impl<T> Envelope<T> {
         Envelope { client_tag: None, remote_tag: None, contents: x }
     }
 
-    pub fn encapsulate<U>(self, f: fn(T) -> U) -> Envelope<U> {
+    pub fn encapsulate<U>(self, f: |T| -> U) -> Envelope<U> {
         let Envelope { client_tag, remote_tag, contents } = self;
         Envelope { client_tag: client_tag, remote_tag: remote_tag, contents: f(contents) }
     }

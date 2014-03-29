@@ -354,6 +354,9 @@ fn netstate_to_pbuf(state: network::State) -> protocol::NetworkListT_NetworkStat
     }
 }
 */
+
+/* refactor: make trait RemotePackable and implement for all message enum types */
+
 fn pack_remote_packet(msg: Envelope<msg::Message>) -> (~[u8], Option<u64>) {
     let mut pmsg: protocol::RemoteMessage = protobuf::Message::new();
 

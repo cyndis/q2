@@ -73,11 +73,13 @@ impl Session {
             None    => return
         };
 
+        let bare = msg.bare();
+
         match msg.contents {
             msg::NetworkCommand(id, cmd) => {
                 let &Session { ref mut networks, ref message_tx, .. } = self;
                 match networks.find_mut(&id) {
-                    Some(nw) => nw.handle_command(cmd, |msg| message_tx.send(Envelope::empty(msg::NetworkMessage(id, msg)))),
+                    Some(nw) => nw.handle_command(bare.copy_with(cmd), |msg| message_tx.send(msg.encapsulate(|m| msg::NetworkMessage(id, m)))),
                     None     => println!("Remote used invalid network id")
                 }
             },
