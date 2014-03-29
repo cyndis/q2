@@ -88,7 +88,7 @@ impl RemoteControl {
             let wakeup_tx = self.wakeup_tx.clone();
             let tag = next_tag;
             next_tag += 1;
-            std::task::task().named("RC-Reader").spawn(proc() {
+            std::task::task().named("remotecontrol.ReaderTask").spawn(proc() {
                 let mut stream = stream;
                 let (remote_tx, remote_rx) = channel();
                 wakeup_tx.send((remote_rx, stream.clone(), tag));
@@ -129,12 +129,12 @@ impl RemoteControl {
         let mut sessions = self.sessions.take_unwrap();
         for (_, session) in sessions.mut_iter() {
             let sess = session.session.take_unwrap();
-            spawn(proc() {
+            std::task::task().named("remotecontrol.SessionTask").spawn(proc() {
                 let mut sess = sess;
                 sess.run();
             });
         }
-        spawn(proc() {
+        std::task::task().named("remotecontrol.ControlTask").spawn(proc() {
             let mut remotes: ~[RemoteData] = ~[];
             loop {
                 let src = {
@@ -180,13 +180,19 @@ impl RemoteControl {
                     FromWakeup => {
                         // New remote added, spin again
                         // TODO What if this fails?
-                        let (rx, stream, tag) = wakeup.recv();
+                        let (rx, stream, tag) = match wakeup.recv_opt() {
+                            Some(x) => x,
+                            None    => { println!("!!! remotecontrol: wakeup is dead? !!!"); continue; }
+                        };
                         remotes.push(RemoteData { rx: rx, stream: stream, session_id: None, tag: tag });
                     },
                     FromSession(session_id) => {
                         // Handle received message from session with id
                         // TODO what to do if this fails?
-                        let msg = sessions.get(&session_id).rx.recv();
+                        let msg = match sessions.get(&session_id).rx.recv_opt() {
+                            Some(x) => x,
+                            None    => { println!("!!! remotecontrol: session is dead? !!!"); continue; }
+                        };
                         let (packet, tag) = pack_remote_packet(RmSessionMessage(msg));
                         for remote in remotes.mut_iter().filter(|r| r.session_id.is_some() && r.session_id.unwrap() == session_id) {
                             if tag.is_none() || tag.unwrap() == remote.tag {

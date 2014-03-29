@@ -9,21 +9,28 @@ pub enum Message {
 /* I hate these clones but whatever for now */
 pub fn parse_message(message: &[u8]) -> Option<Message> {
     parse_message_raw(message).and_then(|msg| {
-        Some(
-                 if msg.command.as_slice() == bytes!("001") {
-                    Welcome(msg.parameters[0])
-                 }
-            else if msg.command.as_slice() == bytes!("PING") {
-                    Ping(msg.parameters[0])
-                 }
-            else if msg.command.as_slice() == bytes!("JOIN") {
-                    Join(msg.prefix.clone().unwrap(), msg.parameters[0])
-                 }
-            else if msg.command.as_slice() == bytes!("PRIVMSG") {
-                    Privmsg(msg.prefix.clone().unwrap(), msg.parameters[0].clone(), msg.parameters[1].clone())
-                 }
-            else { Unknown(msg) }
-        )
+        let RawMessage { prefix, command, parameters } = msg;
+        if command.as_slice() == bytes!("001") {
+            Some(Welcome(parameters[0]))
+        }
+        else if command.as_slice() == bytes!("PING") {
+            Some(Ping(parameters[0]))
+        }
+        else if command.as_slice() == bytes!("JOIN") {
+            let mut it = parameters.move_iter();
+            match (prefix, it.next()) {
+                (Some(prefix), Some(a)) => Some(Join(prefix, a)),
+                _ => None
+            }
+        }
+        else if command.as_slice() == bytes!("PRIVMSG") {
+            let mut it = parameters.move_iter();
+            match (prefix, it.next(), it.next()) {
+                (Some(prefix), Some(a), Some(b)) => Some(Privmsg(prefix, a, b)),
+                _ => None
+            }
+        }
+        else { Some(Unknown(RawMessage { prefix: prefix, command: command, parameters: parameters })) }
     })
 }
 
@@ -72,14 +79,11 @@ pub fn parse_message_raw(message: &[u8]) -> Option<RawMessage> {
         }
     }
 
-    if command.is_some() {
-        Some(RawMessage {
-            prefix: prefix,
-            command: command.unwrap(),
-            parameters: parameters
-        })
-    } else {
-        None
+    match command {
+        Some(command) => Some(RawMessage { prefix: prefix,
+                                           command: command,
+                                           parameters: parameters }),
+        None => None
     }
 }
 

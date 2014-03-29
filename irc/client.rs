@@ -1,6 +1,7 @@
 use std::io::net::{tcp, ip};
 use std::io::{IoResult, IoError};
 use std::{vec, io};
+use std;
 
 #[deriving(Clone)]
 struct Connection {
@@ -76,7 +77,10 @@ impl Client {
     }
 
     pub fn connect(&mut self, addr: ip::SocketAddr) {
-        assert!(self.conn_out.is_none());
+        if self.conn_out.is_some() {
+            println!("irc.client: tried to connect with connection already active");
+            return;
+        }
 
         match Connection::connect(addr) {
             Ok(c) => self.run(c),
@@ -87,7 +91,7 @@ impl Client {
     fn run(&mut self, conn: Connection) {
         self.conn_out = Some(conn.clone());
         let tx = self.pipe.take_unwrap();
-        spawn(proc() {
+        std::task::task().named("irc.client.ReaderTask").spawn(proc() {
             let mut conn_in = io::BufferedReader::new(conn.take_stream());
             let mut buf = vec::with_capacity(512);
             'done: loop {
@@ -114,6 +118,10 @@ impl Client {
     }
 
     fn with_conn(&mut self, f: |&mut Connection| -> IoResult<()>) {
+        if self.conn_out.is_none() {
+            println!("irc.client: with_conn called with no connection");
+            return;
+        }
         if f(self.conn_out.as_mut().unwrap()).is_err() {
             // On error, close outbound socket. Error will hopefully be reported through
             // the inbound socket. Do this properly once the Rust socket API is better..
