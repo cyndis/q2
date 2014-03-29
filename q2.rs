@@ -15,6 +15,7 @@ mod network;
 mod remotecontrol;
 mod encoding;
 mod buffer;
+mod envelope;
 
 fn main() {
     let (mut session, session_tx, session_rx) = session::Session::new();

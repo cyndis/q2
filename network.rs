@@ -27,7 +27,7 @@ pub enum State {
     NetworkConnected
 }
 
-pub struct NetworkSettings {
+pub struct Configuration {
     server: SocketAddr,
     nickname: ~str
 }
@@ -40,7 +40,7 @@ pub struct Network {
     state: State,
     nickname: Option<~[u8]>, // current nickname
 
-    //settings: Option<NetworkSettings>
+    config: Option<Configuration>
 }
 
 impl Network {
@@ -52,7 +52,8 @@ impl Network {
             encoding: std::default::Default::default(),
             buffers: ~[],
             state: NetworkDisconnected,
-            nickname: None
+            nickname: None,
+            config: None
         }
     }
 
@@ -109,21 +110,21 @@ impl Network {
     }
 
     pub fn handle_command(&mut self, cmd: Command, reply: |Message|) {
-        let &Network { ref mut client, ref encoding, .. } = self;
+        let &Network { ref mut client, ref encoding, ref mut config, .. } = self;
         let &EncodingPolicy { network: ref en, outgoing: ref eo, .. } = encoding;
 
         match cmd {
-            Connect(addr) => {
-                self.state = NetworkConnecting;
-                client.connect(addr);
-            },
-            Register(nickname) => {
-                self.nickname = Some(en.encode(&nickname));
-                client.register(
-                    en.encode(&nickname),
-                    en.encode(&nickname),
-                    eo.encode(&nickname)
-                );
+            Connect => {
+                match config {
+                    &Some(ref config) => {
+                        self.state = NetworkConnecting;
+                        client.connect(config.server);
+                        client.register(en.encode(&config.nickname),
+                                        en.encode(&config.nickname),
+                                        eo.encode(&config.nickname));
+                    },
+                    &None => ()
+                }
             },
             JoinChannel(channel) => {
                 client.join(en.encode(&channel));
@@ -134,6 +135,9 @@ impl Network {
             GetBufferList(tag) => {
                 let data = self.buffers.iter().map(|buf| (buf.id, buf.role.clone())).collect();
                 reply(BufferList(tag, data));
+            },
+            SetConfiguration(server, nickname) => {
+                *config = Some(Configuration { server: server, nickname: nickname });
             }
         }
     }
@@ -163,11 +167,11 @@ impl Network {
 }
 
 pub enum Command {
-    Connect(SocketAddr),
-    Register(~str),
+    Connect,
     JoinChannel(~str),
     SendPrivmsg(~str, ~str),
-    GetBufferList(u64 /* tag */)
+    GetBufferList(u64 /* tag */),
+    SetConfiguration(SocketAddr, ~str)
 }
 
 pub enum Message {

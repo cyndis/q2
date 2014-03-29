@@ -8,7 +8,6 @@ message RemoteCommand {
     GetNetworkList = 100;
     /* Network */
     Connect = 200;
-    Register = 201;
     JoinChannel = 202;
     SendPrivmsg = 203;
     GetBufferList = 204;
@@ -24,7 +23,6 @@ message RemoteCommand {
   optional uint64 tag = 4;
 
   optional AttachSessionT attach_session = 5;
-  optional RegisterT register = 6;
   optional JoinChannelT join_channel = 7;
   optional SendPrivmsgT send_privmsg = 8;
   optional SetNetworkConfigurationT set_network_configuration = 9;
@@ -87,7 +85,7 @@ message RemoteMessage {
   optional ErrorT error = 12;
   optional JoinT join = 13;
   optional PrivmsgT privmsg = 14;
-  optional NetworkConfigurationT = 15;
+  optional NetworkConfigurationT network_configuration = 15;
 }
 
 message NetworkListT {

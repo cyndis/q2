@@ -1,25 +1,30 @@
 use collections::HashMap;
 use std;
 use network;
+use envelope::Envelope;
 
 pub struct Session {
     networks: HashMap<u64, network::Network>,
-    message_tx: Sender<SessionMessage>,
-    command_rx: Receiver<SessionCommand>
+    message_tx: Sender<Envelope<msg::Message>>,
+    command_rx: Receiver<Envelope<msg::Command>>
 }
 
-pub enum SessionCommand {
-    NetworkCommand(u64, network::Command),
-    GetNetworkList(u64 /* tag */)
-}
+pub mod msg {
+    use network;
 
-pub enum SessionMessage {
-    NetworkMessage(u64, network::Message),
-    NetworkList(u64, ~[(u64, network::State)]),
+    pub enum Command {
+        NetworkCommand(u64, network::Command),
+        GetNetworkList(u64 /* tag */)
+    }
+
+    pub enum Message {
+        NetworkMessage(u64, network::Message),
+        NetworkList(u64, ~[(u64, network::State)]),
+    }
 }
 
 impl Session {
-    pub fn new() -> (Session, Sender<SessionCommand>, Receiver<SessionMessage>) {
+    pub fn new() -> (Session, Sender<Envelope<msg::Command>>, Receiver<Envelope<msg::Message>>) {
         let (message_tx, message_rx) = channel();
         let (command_tx, command_rx) = channel();
         (Session {
@@ -56,7 +61,7 @@ impl Session {
                 FromRemote => self.handle_command(),
                 FromNetwork(i) => {
                     let &Session { ref mut networks, ref message_tx, .. } = self;
-                    networks.get_mut(&i).handle_message(|msg| message_tx.send(NetworkMessage(i, msg)))
+                    networks.get_mut(&i).handle_message(|msg| message_tx.send(Envelope::empty(msg::NetworkMessage(i, msg))))
                 }
             }
         }
@@ -68,17 +73,17 @@ impl Session {
             None    => return
         };
 
-        match msg {
-            NetworkCommand(id, cmd) => {
+        match msg.contents {
+            msg::NetworkCommand(id, cmd) => {
                 let &Session { ref mut networks, ref message_tx, .. } = self;
                 match networks.find_mut(&id) {
-                    Some(nw) => nw.handle_command(cmd, |msg| message_tx.send(NetworkMessage(id, msg))),
+                    Some(nw) => nw.handle_command(cmd, |msg| message_tx.send(Envelope::empty(msg::NetworkMessage(id, msg)))),
                     None     => println!("Remote used invalid network id")
                 }
             },
-            GetNetworkList(tag) => {
+            msg::GetNetworkList(tag) => {
                 let net_list = self.networks.iter().map(|(id, net)| (*id, net.state)).collect();
-                self.message_tx.send(NetworkList(tag, net_list));
+                self.message_tx.send(msg.copy_with(msg::NetworkList(tag, net_list)));
             }
         }
     }

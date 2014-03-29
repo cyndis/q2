@@ -1,4 +1,4 @@
-use session::{Session, SessionCommand, SessionMessage};
+use session::{Session};
 use collections::HashMap;
 use std::io::net::ip::SocketAddr;
 use std::io::net::tcp::{TcpListener, TcpStream};
@@ -9,6 +9,7 @@ use protobuf::Message;
 use network;
 use session;
 use buffer;
+use envelope::Envelope;
 
 mod protocol;
 
@@ -24,7 +25,7 @@ tag system:
 */
 
 struct RemoteData {
-    rx: Receiver<RemoteCommand>,
+    rx: Receiver<Envelope<msg::Command>>,
     stream: TcpStream,
     session_id: Option<u64>,
     tag: u64
@@ -43,24 +44,29 @@ impl RemoteData {
 
 pub struct SessionData {
     session: Option<Session>,
-    tx: Sender<SessionCommand>,
-    rx: Receiver<SessionMessage>
+    tx: Sender<Envelope<session::msg::Command>>,
+    rx: Receiver<Envelope<session::msg::Message>>
 }
 
 pub struct RemoteControl {
     priv sessions: Option<HashMap<u64, SessionData>>,
-    priv wakeup_rx: Option<Receiver<(Receiver<RemoteCommand>, TcpStream, u64)>>,
-    priv wakeup_tx: Sender<(Receiver<RemoteCommand>, TcpStream, u64)>
+    priv wakeup_rx: Option<Receiver<(Receiver<Envelope<msg::Command>>, TcpStream, u64)>>,
+    priv wakeup_tx: Sender<(Receiver<Envelope<msg::Command>>, TcpStream, u64)>
 }
 
-pub enum RemoteCommand {
-    RcAttachSession(u64),
-    RcSessionCommand(SessionCommand)
-}
+pub mod msg {
+    use session;
 
-pub enum RemoteMessage {
-    RmError(~str),
-    RmSessionMessage(SessionMessage)
+    pub enum Command {
+        AttachSession(u64),
+        SessionCommand(session::msg::Command)
+    }
+
+    pub enum Message {
+        Error(~str),
+        Success,
+        SessionMessage(session::msg::Message)
+    }
 }
 
 impl RemoteControl {
@@ -193,7 +199,7 @@ impl RemoteControl {
                             Some(x) => x,
                             None    => { println!("!!! remotecontrol: session is dead? !!!"); continue; }
                         };
-                        let (packet, tag) = pack_remote_packet(RmSessionMessage(msg));
+                        let (packet, tag) = pack_remote_packet(msg.encapsulate(msg::SessionMessage));
                         for remote in remotes.mut_iter().filter(|r| r.session_id.is_some() && r.session_id.unwrap() == session_id) {
                             if tag.is_none() || tag.unwrap() == remote.tag {
                                 remote.write_packet(packet);
@@ -208,15 +214,18 @@ impl RemoteControl {
                         match in_cmd {
                             Some(cmd) => {
                                 println!("RC ACK: {:?}", cmd);
-                                match cmd {
-                                    RcAttachSession(session_id) => {
+                                let bare = cmd.bare();
+                                match cmd.contents {
+                                    msg::AttachSession(session_id) => {
                                         remotes[remote_idx].session_id = Some(session_id);
+                                        remotes[remote_idx].write_packet(
+                                            pack_remote_packet(bare.copy_with(msg::Success)).val0())
                                     },
-                                    RcSessionCommand(sess_cmd) => {
+                                    msg::SessionCommand(sess_cmd) => {
                                         let sess = remotes[remote_idx].session_id.and_then(|sid|
                                             sessions.find(&sid));
                                         match sess {
-                                            Some(sess) => sess.tx.send(sess_cmd),
+                                            Some(sess) => sess.tx.send(bare.copy_with(sess_cmd)),
                                             None => remotes[remote_idx].write_error(~"No session attached")
                                         }
                                     }
@@ -234,11 +243,11 @@ impl RemoteControl {
     }
 }
 
-fn parse_remote_packet(packet: ~[u8], tag: u64) -> Option<RemoteCommand> {
+fn parse_remote_packet(packet: ~[u8], tag: u64) -> Option<Envelope<msg::Command>> {
     use session;
 
-    let SC = RcSessionCommand;
-    let NC = session::NetworkCommand;
+    let SC = msg::SessionCommand;
+    let NC = session::msg::NetworkCommand;
 
     //println!("raw {}", packet);
 
@@ -254,31 +263,29 @@ fn parse_remote_packet(packet: ~[u8], tag: u64) -> Option<RemoteCommand> {
     if cmd.packet_type.is_none() { return None }
     let packet_type = cmd.packet_type.unwrap();
 
-    match packet_type {
+    let cli_tag = cmd.tag;
+
+    let out_cmd = match packet_type {
         protocol::AttachSession => {
             match cmd.attach_session {
                 Some(protocol::AttachSessionT { session_id: Some(session_id) }) =>
-                    Some(RcAttachSession(session_id)),
+                    Some(msg::AttachSession(session_id)),
                 _ => None
             }
         },
         protocol::GetNetworkList => {
-            Some(RcSessionCommand(session::GetNetworkList(tag)))
+            Some(msg::SessionCommand(session::msg::GetNetworkList(tag)))
         },
         protocol::Connect => {
-            match (cmd.network_id, cmd.connect) {
-                (Some(nid), Some(protocol::ConnectT { address: Some(address) })) =>
-                    from_str(address).and_then(|x| Some(SC(NC(nid, network::Connect(x))))),
+            match cmd.network_id {
+                Some(nid) => Some(SC(NC(nid, network::Connect))),
                 _ => None
             }
         },
-        protocol::Register => {
-            match (cmd.network_id, cmd.register) {
-                (Some(nid), Some(protocol::RegisterT { nickname: Some(nickname) })) =>
-                    Some(SC(NC(nid, network::Register(nickname)))),
-                _ => None
-            }
-        },
+        protocol::Disconnect => {
+            println!("disconnect unimplemented");
+            None
+        }
         protocol::JoinChannel => {
             match (cmd.network_id, cmd.join_channel) {
                 (Some(nid), Some(protocol::JoinChannelT { channel: Some(channel) })) =>
@@ -298,47 +305,26 @@ fn parse_remote_packet(packet: ~[u8], tag: u64) -> Option<RemoteCommand> {
                 Some(nid) => Some(SC(NC(nid, network::GetBufferList(tag)))),
                 _ => None
             }
+        },
+        protocol::SetNetworkConfiguration => {
+            match (cmd.network_id, cmd.set_network_configuration) {
+                (Some(nid), Some(protocol::SetNetworkConfigurationT { server: Some(server), nickname: Some(nickname) })) =>
+                    match from_str(server) { Some(server) => Some(SC(NC(nid, network::SetConfiguration(server, nickname)))),
+                                             None => None },
+                _ => None
+            }
+        },
+        protocol::GetNetworkConfiguration => {
+            println!("getnetworkconfig unimplemented");
+            None
         }
+    };
+
+    match out_cmd {
+        Some(out_cmd) => Some(Envelope { client_tag: cli_tag, remote_tag: None, contents: out_cmd }),
+        None => None
     }
 }
-
-/*
-pub enum RemoteCommand {
-    RcAttachSession(u64),
-    RcSessionCommand(SessionCommand)
-}
-
-pub enum RemoteMessage {
-    RmError(~str),
-    RmSessionMessage(SessionMessage)
-}
-
-pub enum SessionCommand {
-    NetworkCommand(u64, network::Command),
-    GetNetworkList(u64 tag)
-}
-
-pub enum SessionMessage {
-    NetworkMessage(u64, network::Message),
-    NetworkList(u64, ~[u64])
-}
-
-pub enum Command {
-    Connect(SocketAddr),
-    Register(~str),
-    JoinChannel(~str),
-    SendPrivmsg(~str, ~str),
-    GetBufferList(u64 tag)
-}
-
-pub enum Message {
-    Disconnected(~str),
-    Connected,
-    NewBuffer(u64, buffer::Role),
-    BufferMessage(u64, buffer::Message),
-    BufferList(u64 tag, ~[(u64, buffer::Role)])
-}
-*/
 
 fn role_to_pbuf(role: buffer::Role) -> protocol::BufferRole {
     match role {
@@ -368,19 +354,24 @@ fn netstate_to_pbuf(state: network::State) -> protocol::NetworkListT_NetworkStat
     }
 }
 */
-fn pack_remote_packet(msg: RemoteMessage) -> (~[u8], Option<u64>) {
+fn pack_remote_packet(msg: Envelope<msg::Message>) -> (~[u8], Option<u64>) {
     let mut pmsg: protocol::RemoteMessage = protobuf::Message::new();
 
     let mut out_tag = None;
 
-    match msg {
-        RmError(err) => {
+    pmsg.tag = msg.client_tag;
+
+    match msg.contents {
+        msg::Error(err) => {
             pmsg.set_packet_type(protocol::Error);
             pmsg.set_error(protocol::ErrorT { msg: Some(err) });
         },
-        RmSessionMessage(msg) => {
+        msg::Success => {
+            pmsg.set_packet_type(protocol::Success);
+        },
+        msg::SessionMessage(msg) => {
             match msg {
-                session::NetworkList(tag, data) => {
+                session::msg::NetworkList(tag, data) => {
                     pmsg.set_packet_type(protocol::NetworkList);
                     out_tag = Some(tag);
                     for (id, state) in data.move_iter() {
@@ -390,7 +381,7 @@ fn pack_remote_packet(msg: RemoteMessage) -> (~[u8], Option<u64>) {
                         });
                     }
                 },
-                session::NetworkMessage(nid, msg) => {
+                session::msg::NetworkMessage(nid, msg) => {
                     pmsg.set_network_id(nid);
                     match msg {
                         network::Disconnected(reason) => {
