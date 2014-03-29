@@ -23,6 +23,7 @@ tag system:
     the packet sending code will then check that the tag of the packet matches the
       tag of the remote before sending it.
 */
+// TODO fixme don't use embedded tags, use envelope remote_tag field
 
 struct RemoteData {
     rx: Receiver<Envelope<msg::Command>>,
@@ -218,6 +219,7 @@ impl RemoteControl {
                                 match cmd.contents {
                                     msg::AttachSession(session_id) => {
                                         remotes[remote_idx].session_id = Some(session_id);
+                                        // FIXME check that session id is valid
                                         remotes[remote_idx].write_packet(
                                             pack_remote_packet(bare.copy_with(msg::Success)).val0())
                                     },
@@ -374,6 +376,13 @@ fn pack_remote_packet(msg: Envelope<msg::Message>) -> (~[u8], Option<u64>) {
         },
         msg::SessionMessage(msg) => {
             match msg {
+                session::msg::Error(err) => {
+                    pmsg.set_packet_type(protocol::Error);
+                    pmsg.set_error(protocol::ErrorT { msg: Some(err) });
+                },
+                session::msg::Success => {
+                    pmsg.set_packet_type(protocol::Success);
+                },
                 session::msg::NetworkList(tag, data) => {
                     pmsg.set_packet_type(protocol::NetworkList);
                     out_tag = Some(tag);
@@ -387,6 +396,13 @@ fn pack_remote_packet(msg: Envelope<msg::Message>) -> (~[u8], Option<u64>) {
                 session::msg::NetworkMessage(nid, msg) => {
                     pmsg.set_network_id(nid);
                     match msg {
+                        network::Error(err) => {
+                            pmsg.set_packet_type(protocol::Error);
+                            pmsg.set_error(protocol::ErrorT { msg: Some(err) });
+                        },
+                        network::Success => {
+                            pmsg.set_packet_type(protocol::Success);
+                        },
                         network::Disconnected(reason) => {
                             pmsg.set_packet_type(protocol::Disconnected);
                             pmsg.set_disconnected(protocol::DisconnectedT { reason: Some(reason) });

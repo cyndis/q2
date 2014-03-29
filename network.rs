@@ -125,15 +125,18 @@ impl Network {
                         client.register(en.encode(&config.nickname),
                                         en.encode(&config.nickname),
                                         eo.encode(&config.nickname));
+                        reply(bare.copy_with(Success));
                     },
-                    &None => ()
+                    &None => reply(bare.copy_with(Error(~"network not configured")))
                 }
             },
             JoinChannel(channel) => {
                 client.join(en.encode(&channel));
+                reply(bare.copy_with(Success));
             },
             SendPrivmsg(target, message) => {
                 client.privmsg(en.encode(&target), eo.encode(&message));
+                reply(bare.copy_with(Success));
             },
             GetBufferList(tag) => {
                 let data = self.buffers.iter().map(|buf| (buf.id, buf.role.clone())).collect();
@@ -141,6 +144,7 @@ impl Network {
             },
             SetConfiguration(server, nickname) => {
                 *config = Some(Configuration { server: server, nickname: nickname });
+                reply(bare.copy_with(Success));
             }
         }
     }
@@ -182,5 +186,7 @@ pub enum Message {
     Connected,
     NewBuffer(u64, buffer::Role),
     BufferMessage(u64, buffer::Message),
-    BufferList(u64 /* tag */, ~[(u64, buffer::Role)])
+    BufferList(u64 /* tag */, ~[(u64, buffer::Role)]),
+    Error(~str),
+    Success
 }

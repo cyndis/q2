@@ -20,6 +20,8 @@ pub mod msg {
     pub enum Message {
         NetworkMessage(u64, network::Message),
         NetworkList(u64, ~[(u64, network::State)]),
+        Error(~str),
+        Success
     }
 }
 
