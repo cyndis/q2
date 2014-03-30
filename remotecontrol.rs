@@ -285,7 +285,7 @@ fn parse_remote_packet(packet: ~[u8], tag: u64) -> Option<Envelope<msg::Command>
         },
         protocol::Connect => {
             match cmd.network_id {
-                Some(nid) => Some(SC(NC(nid, network::Connect))),
+                Some(nid) => Some(SC(NC(nid, network::msg::Connect))),
                 _ => None
             }
         },
@@ -296,34 +296,36 @@ fn parse_remote_packet(packet: ~[u8], tag: u64) -> Option<Envelope<msg::Command>
         protocol::JoinChannel => {
             match (cmd.network_id, cmd.join_channel) {
                 (Some(nid), Some(protocol::JoinChannelT { channel: Some(channel) })) =>
-                    Some(SC(NC(nid, network::JoinChannel(channel)))),
+                    Some(SC(NC(nid, network::msg::JoinChannel(channel)))),
                 _ => None
             }
         },
         protocol::SendPrivmsg => {
             match (cmd.network_id, cmd.send_privmsg) {
                 (Some(nid), Some(protocol::SendPrivmsgT { target: Some(target), msg: Some(msg) })) =>
-                    Some(SC(NC(nid, network::SendPrivmsg(target, msg)))),
+                    Some(SC(NC(nid, network::msg::SendPrivmsg(target, msg)))),
                 _ => None
             }
         },
         protocol::GetBufferList => {
             match cmd.network_id {
-                Some(nid) => Some(SC(NC(nid, network::GetBufferList))),
+                Some(nid) => Some(SC(NC(nid, network::msg::GetBufferList))),
                 _ => None
             }
         },
         protocol::SetNetworkConfiguration => {
             match (cmd.network_id, cmd.set_network_configuration) {
                 (Some(nid), Some(protocol::SetNetworkConfigurationT { server: Some(server), nickname: Some(nickname) })) =>
-                    match from_str(server) { Some(server) => Some(SC(NC(nid, network::SetConfiguration(server, nickname)))),
+                    match from_str(server) { Some(server) => Some(SC(NC(nid, network::msg::SetConfiguration(server, nickname)))),
                                              None => None },
                 _ => None
             }
         },
         protocol::GetNetworkConfiguration => {
-            println!("getnetworkconfig unimplemented");
-            None
+            match cmd.network_id {
+                Some(nid) => Some(SC(NC(nid, network::msg::GetConfiguration))),
+                _ => None
+            }
         }
     };
 
@@ -358,6 +360,19 @@ fn netstate_to_pbuf(state: network::State) -> protocol::NetworkListT_NetworkStat
         network::NetworkDisconnected => protocol::NetworkDisconnected,
         network::NetworkConnecting => protocol::NetworkConnecting,
         network::NetworkConnected => protocol::NetworkConnected
+    }
+}
+
+fn netconfig_to_pbuf(config: Option<network::Configuration>) -> Option<protocol::NetworkConfigurationT> {
+    match config {
+        None => None,
+        Some(config) => {
+            let network::Configuration { server, nickname } = config;
+            Some(protocol::NetworkConfigurationT {
+                server: Some(server.to_str()),
+                nickname: Some(nickname)
+            })
+        }
     }
 }
 
@@ -397,28 +412,28 @@ fn pack_remote_packet(msg: Envelope<msg::Message>) -> ~[u8] {
                 session::msg::NetworkMessage(nid, msg) => {
                     pmsg.set_network_id(nid);
                     match msg {
-                        network::Error(err) => {
+                        network::msg::Error(err) => {
                             pmsg.set_packet_type(protocol::Error);
                             pmsg.set_error(protocol::ErrorT { msg: Some(err) });
                         },
-                        network::Success => {
+                        network::msg::Success => {
                             pmsg.set_packet_type(protocol::Success);
                         },
-                        network::Disconnected(reason) => {
+                        network::msg::Disconnected(reason) => {
                             pmsg.set_packet_type(protocol::Disconnected);
                             pmsg.set_disconnected(protocol::DisconnectedT { reason: Some(reason) });
                         },
-                        network::Connected => {
+                        network::msg::Connected => {
                             pmsg.set_packet_type(protocol::Connected);
                         },
-                        network::NewBuffer(bufid, role) => {
+                        network::msg::NewBuffer(bufid, role) => {
                             pmsg.set_packet_type(protocol::NewBuffer);
                             pmsg.set_new_buffer(protocol::NewBufferT {
                                 id: Some(bufid),
                                 role: Some(role_to_pbuf(role))
                             });
                         },
-                        network::BufferList(data) => {
+                        network::msg::BufferList(data) => {
                             pmsg.set_packet_type(protocol::BufferList);
                             for (bufid, role) in data.move_iter() {
                                 pmsg.add_buffer_list(protocol::BufferListT {
@@ -427,7 +442,7 @@ fn pack_remote_packet(msg: Envelope<msg::Message>) -> ~[u8] {
                                 });
                             }
                         },
-                        network::BufferMessage(bufid, msg) => {
+                        network::msg::BufferMessage(bufid, msg) => {
                             pmsg.set_buffer_id(bufid);
                             pmsg.set_message_id(msg.id);
                             pmsg.set_message_time(msg.time_ns);
@@ -445,6 +460,10 @@ fn pack_remote_packet(msg: Envelope<msg::Message>) -> ~[u8] {
                                     pmsg.set_privmsg(protocol::PrivmsgT { who: Some(who), msg: Some(msg) });
                                 }
                             }
+                        },
+                        network::msg::Configuration(config) => {
+                            pmsg.set_packet_type(protocol::NetworkConfiguration);
+                            pmsg.network_configuration = netconfig_to_pbuf(config);
                         }
                     }
                 }

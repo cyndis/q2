@@ -13,12 +13,12 @@ pub mod msg {
     use network;
 
     pub enum Command {
-        NetworkCommand(u64, network::Command),
+        NetworkCommand(u64, network::msg::Command),
         GetNetworkList
     }
 
     pub enum Message {
-        NetworkMessage(u64, network::Message),
+        NetworkMessage(u64, network::msg::Message),
         NetworkList(~[(u64, network::State)]),
         Error(~str),
         Success

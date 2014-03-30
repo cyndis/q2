@@ -28,6 +28,7 @@ pub enum State {
     NetworkConnected
 }
 
+#[deriving(Clone)]
 pub struct Configuration {
     server: SocketAddr,
     nickname: ~str
@@ -58,7 +59,7 @@ impl Network {
         }
     }
 
-    pub fn handle_message(&mut self, reply: |Message|) {
+    pub fn handle_message(&mut self, reply: |msg::Message|) {
         let msg = match self.rx.recv_opt() {
             Some(m) => m,
             None    => return
@@ -73,14 +74,14 @@ impl Network {
                 self.client = cli;
                 self.rx = rx;
                 self.state = NetworkDisconnected;
-                reply(Disconnected(err.desc.to_owned()))
+                reply(msg::Disconnected(err.desc.to_owned()))
             },
             irc::client::Message(msg) => {
                 match msg {
                     irc::parser::Ping(ref sender) => self.client.pong(*sender),
                     irc::parser::Welcome(_) => {
                         self.state = NetworkConnected;
-                        reply(Connected);
+                        reply(msg::Connected);
                         self.reply_buffer(reply, buffer::Status,
                                           buffer::Information(~"Welcome to IRC!"));
                     },
@@ -110,14 +111,14 @@ impl Network {
         }
     }
 
-    pub fn handle_command(&mut self, cmd: Envelope<Command>, reply: |Envelope<Message>|) {
+    pub fn handle_command(&mut self, cmd: Envelope<msg::Command>, reply: |Envelope<msg::Message>|) {
         let &Network { ref mut client, ref encoding, ref mut config, .. } = self;
         let &EncodingPolicy { network: ref en, outgoing: ref eo, .. } = encoding;
 
         let bare = cmd.bare();
 
         match cmd.contents {
-            Connect => {
+            msg::Connect => {
                 match config {
                     &Some(ref config) => {
                         self.state = NetworkConnecting;
@@ -125,31 +126,34 @@ impl Network {
                         client.register(en.encode(&config.nickname),
                                         en.encode(&config.nickname),
                                         eo.encode(&config.nickname));
-                        reply(bare.copy_with(Success));
+                        reply(bare.copy_with(msg::Success));
                     },
-                    &None => reply(bare.copy_with(Error(~"network not configured")))
+                    &None => reply(bare.copy_with(msg::Error(~"network not configured")))
                 }
             },
-            JoinChannel(channel) => {
+            msg::JoinChannel(channel) => {
                 client.join(en.encode(&channel));
-                reply(bare.copy_with(Success));
+                reply(bare.copy_with(msg::Success));
             },
-            SendPrivmsg(target, message) => {
+            msg::SendPrivmsg(target, message) => {
                 client.privmsg(en.encode(&target), eo.encode(&message));
-                reply(bare.copy_with(Success));
+                reply(bare.copy_with(msg::Success));
             },
-            GetBufferList => {
+            msg::GetBufferList => {
                 let data = self.buffers.iter().map(|buf| (buf.id, buf.role.clone())).collect();
-                reply(bare.copy_with(BufferList(data)));
+                reply(bare.copy_with(msg::BufferList(data)));
             },
-            SetConfiguration(server, nickname) => {
+            msg::SetConfiguration(server, nickname) => {
                 *config = Some(Configuration { server: server, nickname: nickname });
-                reply(bare.copy_with(Success));
+                reply(bare.copy_with(msg::Success));
+            },
+            msg::GetConfiguration => {
+                reply(bare.copy_with(msg::Configuration(config.clone())))
             }
         }
     }
 
-    fn get_buffer<'a>(&'a mut self, reply: |Message|, role: buffer::Role) -> &'a mut buffer::Buffer {
+    fn get_buffer<'a>(&'a mut self, reply: |msg::Message|, role: buffer::Role) -> &'a mut buffer::Buffer {
         let pos = {
             self.buffers.iter().position(|buffer| buffer.role == role)
         };
@@ -157,36 +161,43 @@ impl Network {
             Some(i) => &mut self.buffers[i],
             None    => {
                 let buf = buffer::Buffer::empty(0 /* FIXME */, role);
-                reply(NewBuffer(buf.id, buf.role.clone()));
+                reply(msg::NewBuffer(buf.id, buf.role.clone()));
                 self.buffers.push(buf);
                 self.buffers.mut_last().unwrap()
             }
         }
     }
 
-    fn reply_buffer(&mut self, reply: |Message|, role: buffer::Role, cont: buffer::MessageContents) {
+    fn reply_buffer(&mut self, reply: |msg::Message|, role: buffer::Role, cont: buffer::MessageContents) {
         let buffer = self.get_buffer(|x| reply(x), role);
 
         let buf_id = buffer.id;
         buffer.add(buffer::Message::now(cont),
-            |msg| reply(BufferMessage(buf_id, (*msg).clone())));
+            |msg| reply(msg::BufferMessage(buf_id, (*msg).clone())));
     }
 }
 
-pub enum Command {
-    Connect,
-    JoinChannel(~str),
-    SendPrivmsg(~str, ~str),
-    GetBufferList,
-    SetConfiguration(SocketAddr, ~str)
-}
+pub mod msg {
+    use std::io::net::ip::SocketAddr;
+    use buffer;
 
-pub enum Message {
-    Disconnected(~str),
-    Connected,
-    NewBuffer(u64, buffer::Role),
-    BufferMessage(u64, buffer::Message),
-    BufferList(~[(u64, buffer::Role)]),
-    Error(~str),
-    Success
+    pub enum Command {
+        Connect,
+        JoinChannel(~str),
+        SendPrivmsg(~str, ~str),
+        GetBufferList,
+        SetConfiguration(SocketAddr, ~str),
+        GetConfiguration
+    }
+
+    pub enum Message {
+        Disconnected(~str),
+        Connected,
+        NewBuffer(u64, buffer::Role),
+        BufferMessage(u64, buffer::Message),
+        BufferList(~[(u64, buffer::Role)]),
+        Error(~str),
+        Success,
+        Configuration(Option<super::Configuration>)
+    }
 }
