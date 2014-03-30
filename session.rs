@@ -14,12 +14,12 @@ pub mod msg {
 
     pub enum Command {
         NetworkCommand(u64, network::Command),
-        GetNetworkList(u64 /* tag */)
+        GetNetworkList
     }
 
     pub enum Message {
         NetworkMessage(u64, network::Message),
-        NetworkList(u64, ~[(u64, network::State)]),
+        NetworkList(~[(u64, network::State)]),
         Error(~str),
         Success
     }
@@ -85,9 +85,9 @@ impl Session {
                     None     => println!("Remote used invalid network id")
                 }
             },
-            msg::GetNetworkList(tag) => {
+            msg::GetNetworkList => {
                 let net_list = self.networks.iter().map(|(id, net)| (*id, net.state)).collect();
-                self.message_tx.send(msg.copy_with(msg::NetworkList(tag, net_list)));
+                self.message_tx.send(msg.copy_with(msg::NetworkList(net_list)));
             }
         }
     }

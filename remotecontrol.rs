@@ -120,7 +120,7 @@ impl RemoteControl {
                         Some(cmd) => remote_tx.send(cmd),
                         None => {
                             // FIXME code duplication + client_tag is lost
-                            let data = pack_remote_packet(Envelope::empty(msg::Error(~"invalid packet"))).val0();
+                            let data = pack_remote_packet(Envelope::empty(msg::Error(~"invalid packet")));
                             stream.write_le_u32(data.len() as u32);
                             stream.write(data);
                         }
@@ -191,7 +191,6 @@ impl RemoteControl {
                 match src {
                     FromWakeup => {
                         // New remote added, spin again
-                        // TODO What if this fails?
                         let (rx, stream, tag) = match wakeup.recv_opt() {
                             Some(x) => x,
                             None    => { println!("!!! remotecontrol: wakeup is dead? !!!"); continue; }
@@ -200,12 +199,12 @@ impl RemoteControl {
                     },
                     FromSession(session_id) => {
                         // Handle received message from session with id
-                        // TODO what to do if this fails?
                         let msg = match sessions.get(&session_id).rx.recv_opt() {
                             Some(x) => x,
                             None    => { println!("!!! remotecontrol: session is dead? !!!"); continue; }
                         };
-                        let (packet, tag) = pack_remote_packet(msg.encapsulate(msg::SessionMessage));
+                        let tag = msg.remote_tag;
+                        let packet = pack_remote_packet(msg.encapsulate(msg::SessionMessage));
                         for remote in remotes.mut_iter().filter(|r| r.session_id.is_some() && r.session_id.unwrap() == session_id) {
                             if tag.is_none() || tag.unwrap() == remote.tag {
                                 remote.write_packet(packet);
@@ -226,7 +225,7 @@ impl RemoteControl {
                                         remotes[remote_idx].session_id = Some(session_id);
                                         // FIXME check that session id is valid
                                         remotes[remote_idx].write_packet(
-                                            pack_remote_packet(bare.copy_with(msg::Success)).val0())
+                                            pack_remote_packet(bare.copy_with(msg::Success)))
                                     },
                                     msg::SessionCommand(sess_cmd) => {
                                         let sess = remotes[remote_idx].session_id.and_then(|sid|
@@ -281,7 +280,7 @@ fn parse_remote_packet(packet: ~[u8], tag: u64) -> Option<Envelope<msg::Command>
             }
         },
         protocol::GetNetworkList => {
-            Some(msg::SessionCommand(session::msg::GetNetworkList(tag)))
+            Some(msg::SessionCommand(session::msg::GetNetworkList))
         },
         protocol::Connect => {
             match cmd.network_id {
@@ -309,7 +308,7 @@ fn parse_remote_packet(packet: ~[u8], tag: u64) -> Option<Envelope<msg::Command>
         },
         protocol::GetBufferList => {
             match cmd.network_id {
-                Some(nid) => Some(SC(NC(nid, network::GetBufferList(tag)))),
+                Some(nid) => Some(SC(NC(nid, network::GetBufferList))),
                 _ => None
             }
         },
@@ -328,7 +327,7 @@ fn parse_remote_packet(packet: ~[u8], tag: u64) -> Option<Envelope<msg::Command>
     };
 
     match out_cmd {
-        Some(out_cmd) => Some(Envelope { client_tag: cli_tag, remote_tag: None, contents: out_cmd }),
+        Some(out_cmd) => Some(Envelope { client_tag: cli_tag, remote_tag: Some(tag), contents: out_cmd }),
         None => None
     }
 }
@@ -364,10 +363,8 @@ fn netstate_to_pbuf(state: network::State) -> protocol::NetworkListT_NetworkStat
 
 /* refactor: make trait RemotePackable and implement for all message enum types */
 
-fn pack_remote_packet(msg: Envelope<msg::Message>) -> (~[u8], Option<u64>) {
+fn pack_remote_packet(msg: Envelope<msg::Message>) -> ~[u8] {
     let mut pmsg: protocol::RemoteMessage = protobuf::Message::new();
-
-    let mut out_tag = None;
 
     pmsg.tag = msg.client_tag;
 
@@ -388,9 +385,8 @@ fn pack_remote_packet(msg: Envelope<msg::Message>) -> (~[u8], Option<u64>) {
                 session::msg::Success => {
                     pmsg.set_packet_type(protocol::Success);
                 },
-                session::msg::NetworkList(tag, data) => {
+                session::msg::NetworkList(data) => {
                     pmsg.set_packet_type(protocol::NetworkList);
-                    out_tag = Some(tag);
                     for (id, state) in data.move_iter() {
                         pmsg.add_network_list(protocol::NetworkListT {
                             id: Some(id),
@@ -422,9 +418,8 @@ fn pack_remote_packet(msg: Envelope<msg::Message>) -> (~[u8], Option<u64>) {
                                 role: Some(role_to_pbuf(role))
                             });
                         },
-                        network::BufferList(tag, data) => {
+                        network::BufferList(data) => {
                             pmsg.set_packet_type(protocol::BufferList);
-                            out_tag = Some(tag);
                             for (bufid, role) in data.move_iter() {
                                 pmsg.add_buffer_list(protocol::BufferListT {
                                     id: Some(bufid),
@@ -461,9 +456,9 @@ fn pack_remote_packet(msg: Envelope<msg::Message>) -> (~[u8], Option<u64>) {
         println!("OUT >> {:?}", pmsg);
         let out_str = pmsg.write_to_bytes();
         //println!("OUTBUF {}", out_str);
-        (out_str, out_tag)
+        out_str
     } else {
         println!("FAIL: output empty");
-        (~[], None)
+        ~[]
     }
 }

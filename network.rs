@@ -138,9 +138,9 @@ impl Network {
                 client.privmsg(en.encode(&target), eo.encode(&message));
                 reply(bare.copy_with(Success));
             },
-            GetBufferList(tag) => {
+            GetBufferList => {
                 let data = self.buffers.iter().map(|buf| (buf.id, buf.role.clone())).collect();
-                reply(bare.copy_with(BufferList(tag, data)));
+                reply(bare.copy_with(BufferList(data)));
             },
             SetConfiguration(server, nickname) => {
                 *config = Some(Configuration { server: server, nickname: nickname });
@@ -177,7 +177,7 @@ pub enum Command {
     Connect,
     JoinChannel(~str),
     SendPrivmsg(~str, ~str),
-    GetBufferList(u64 /* tag */),
+    GetBufferList,
     SetConfiguration(SocketAddr, ~str)
 }
 
@@ -186,7 +186,7 @@ pub enum Message {
     Connected,
     NewBuffer(u64, buffer::Role),
     BufferMessage(u64, buffer::Message),
-    BufferList(u64 /* tag */, ~[(u64, buffer::Role)]),
+    BufferList(~[(u64, buffer::Role)]),
     Error(~str),
     Success
 }
