@@ -118,7 +118,12 @@ impl RemoteControl {
                     println!("<< {:?}", cmd);
                     match cmd {
                         Some(cmd) => remote_tx.send(cmd),
-                        None => ()
+                        None => {
+                            // FIXME code duplication + client_tag is lost
+                            let data = pack_remote_packet(Envelope::empty(msg::Error(~"invalid packet"))).val0();
+                            stream.write_le_u32(data.len() as u32);
+                            stream.write(data);
+                        }
                     }
                 }
             });
