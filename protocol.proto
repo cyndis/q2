@@ -89,7 +89,13 @@ message RemoteMessage {
 }
 
 message NetworkListT {
+  enum NetworkState {
+    NetworkDisconnected = 0;
+    NetworkConnecting = 1;
+    NetworkConnected = 2;
+  }
   required uint64 id = 1;
+  required NetworkState state = 2;
 }
 
 message DisconnectedT {

@@ -11,6 +11,7 @@ use session;
 use buffer;
 use envelope::Envelope;
 
+#[allow(dead_code)]
 mod protocol;
 
 /*
@@ -351,7 +352,7 @@ fn role_to_pbuf(role: buffer::Role) -> protocol::BufferRole {
             }
     }
 }
-/*
+
 fn netstate_to_pbuf(state: network::State) -> protocol::NetworkListT_NetworkState {
     match state {
         network::NetworkDisconnected => protocol::NetworkDisconnected,
@@ -359,7 +360,6 @@ fn netstate_to_pbuf(state: network::State) -> protocol::NetworkListT_NetworkStat
         network::NetworkConnected => protocol::NetworkConnected
     }
 }
-*/
 
 /* refactor: make trait RemotePackable and implement for all message enum types */
 
@@ -390,7 +390,7 @@ fn pack_remote_packet(msg: Envelope<msg::Message>) -> ~[u8] {
                     for (id, state) in data.move_iter() {
                         pmsg.add_network_list(protocol::NetworkListT {
                             id: Some(id),
-                            //state: Some(netstate_to_pbuf(state))
+                            state: Some(netstate_to_pbuf(state))
                         });
                     }
                 },
