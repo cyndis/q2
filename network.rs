@@ -1,10 +1,10 @@
 use irc;
 use irc::client::{Client, ClientMessage};
-use std::io::net::ip::SocketAddr;
 use std;
 use encoding::{Encoding, IrcEncoding};
 use buffer;
 use envelope::Envelope;
+use database;
 
 pub struct EncodingPolicy {
     network: Encoding,
@@ -30,11 +30,13 @@ pub enum State {
 
 #[deriving(Clone)]
 pub struct Configuration {
-    server: SocketAddr,
+    server: ~str,
     nickname: ~str
 }
 
 pub struct Network {
+    id: u64,
+    db: database::Handle,
     client: Client,
     rx: Receiver<ClientMessage>,
     encoding: EncodingPolicy,
@@ -46,9 +48,11 @@ pub struct Network {
 }
 
 impl Network {
-    pub fn new() -> Network {
+    pub fn new(id: u64, db: database::Handle) -> Network {
         let (cli, rx) = Client::new();
         Network {
+            id: id,
+            db: db,
             client: cli,
             rx: rx,
             encoding: std::default::Default::default(),
@@ -97,12 +101,12 @@ impl Network {
                             let who_l = self.encoding.network.decode(who.irc_lowercase());
                             let who = self.encoding.network.decode(who);
                             let msg = self.encoding.incoming.decode(msg);
-                            self.reply_buffer(reply, buffer::Query(who_l), buffer::Message(who, msg));
+                            self.reply_buffer(reply, buffer::Query(who_l), buffer::Privmsg(who, msg));
                         } else {
                             let target_l = self.encoding.network.decode(target.irc_lowercase());
                             let who = self.encoding.network.decode(who);
                             let msg = self.encoding.incoming.decode(msg);
-                            self.reply_buffer(reply, buffer::Channel(target_l), buffer::Message(who, msg));
+                            self.reply_buffer(reply, buffer::Channel(target_l), buffer::Privmsg(who, msg));
                         }
                     }
                     _ => ()
@@ -121,16 +125,27 @@ impl Network {
             msg::Connect => {
                 match config {
                     &Some(ref config) => {
-                        self.state = NetworkConnecting;
-                        client.connect(config.server);
-                        client.register(en.encode(&config.nickname),
-                                        en.encode(&config.nickname),
-                                        eo.encode(&config.nickname));
-                        reply(bare.copy_with(msg::Success));
+                        match from_str(config.server) {
+                            Some(server) => {
+                                self.state = NetworkConnecting;
+                                client.connect(server);
+                                client.register(en.encode(&config.nickname),
+                                                en.encode(&config.nickname),
+                                                eo.encode(&config.nickname));
+                                reply(bare.copy_with(msg::Success));
+                            },
+                            None => reply(bare.copy_with(msg::Error(~"invalid server")))
+                        }
                     },
                     &None => reply(bare.copy_with(msg::Error(~"network not configured")))
                 }
             },
+            msg::Disconnect => {
+                self.state = NetworkDisconnected;
+                client.quit(eo.encode(&~"So long, and thanks for all the fish."));
+                client.disconnect();
+                reply(bare.copy_with(msg::Success));
+            }
             msg::JoinChannel(channel) => {
                 client.join(en.encode(&channel));
                 reply(bare.copy_with(msg::Success));
@@ -143,12 +158,20 @@ impl Network {
                 let data = self.buffers.iter().map(|buf| (buf.id, buf.role.clone())).collect();
                 reply(bare.copy_with(msg::BufferList(data)));
             },
-            msg::SetConfiguration(server, nickname) => {
-                *config = Some(Configuration { server: server, nickname: nickname });
+            msg::SetConfiguration(cfg) => {
+                self.db.update_network_configuration(self.id, &cfg);
+                *config = Some(cfg);
                 reply(bare.copy_with(msg::Success));
             },
             msg::GetConfiguration => {
                 reply(bare.copy_with(msg::Configuration(config.clone())))
+            },
+            msg::GetBufferMessageRange(bufid, count, before_id) => {
+                match self.buffers.mut_iter().find(|b| b.id == bufid) {
+                    Some(buf) => reply(bare.copy_with(
+                        msg::BufferMessageRange(bufid, buf.fetch_message_range(count, before_id)))),
+                    None => reply(bare.copy_with(msg::Error(~"invalid buffer specified")))
+                }
             }
         }
     }
@@ -160,7 +183,7 @@ impl Network {
         match pos {
             Some(i) => &mut self.buffers[i],
             None    => {
-                let buf = buffer::Buffer::empty(0 /* FIXME */, role);
+                let buf = self.db.create_buffer(self.id, role);
                 reply(msg::NewBuffer(buf.id, buf.role.clone()));
                 self.buffers.push(buf);
                 self.buffers.mut_last().unwrap()
@@ -173,21 +196,22 @@ impl Network {
 
         let buf_id = buffer.id;
         buffer.add(buffer::Message::now(cont),
-            |msg| reply(msg::BufferMessage(buf_id, (*msg).clone())));
+            |msg| reply(msg::BufferMessage(buf_id, msg)));
     }
 }
 
 pub mod msg {
-    use std::io::net::ip::SocketAddr;
     use buffer;
 
     pub enum Command {
         Connect,
+        Disconnect,
         JoinChannel(~str),
         SendPrivmsg(~str, ~str),
         GetBufferList,
-        SetConfiguration(SocketAddr, ~str),
-        GetConfiguration
+        SetConfiguration(super::Configuration),
+        GetConfiguration,
+        GetBufferMessageRange(u64, uint, Option<u64>)
     }
 
     pub enum Message {
@@ -198,6 +222,7 @@ pub mod msg {
         BufferList(~[(u64, buffer::Role)]),
         Error(~str),
         Success,
-        Configuration(Option<super::Configuration>)
+        Configuration(Option<super::Configuration>),
+        BufferMessageRange(u64, ~[buffer::Message])
     }
 }

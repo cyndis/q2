@@ -1,4 +1,5 @@
 use time;
+use database;
 
 #[deriving(Eq, Clone)]
 pub enum Role {
@@ -33,38 +34,79 @@ impl Message {
 pub enum MessageContents {
     Information(~str),
     Join(~str), // who
-    Message(~str, ~str) // sender, message
+    Privmsg(~str, ~str) // sender, message
 }
 
-// TODO make this database backed
+/*
+mod memory {
+    pub struct Buffer {
+        id: u64,
+        role: Role,
+        messages: ~[Message],
+        last_read: Option<u64>,
+        next_id: u64
+    }
+
+    impl Buffer {
+        pub fn empty(id: u64, role: Role) -> Buffer {
+            Buffer {
+                id: id,
+                messages: ~[],
+                last_read: None,
+                next_id: 0,
+                role: role
+            }
+        }
+
+        pub fn with_messages(id: u64, role: Role, messages: ~[Message]) -> Buffer {
+            Buffer {
+                id: id,
+                messages: messages,
+                last_read: None,
+                next_id: 0,
+                role: role
+            }
+        }
+
+        pub fn add(&mut self, mut msg: Message, cb: |&Message|) -> u64 {
+            msg.id = self.next_id;
+            self.next_id += 1;
+            self.messages.push(msg);
+            cb(self.messages.last().unwrap());
+            self.next_id - 1
+        }
+
+        pub fn set_last_read(&mut self, last_read: u64) {
+            self.last_read = Some(last_read);
+        }
+    }
+}
+*/
+
 pub struct Buffer {
     id: u64,
     role: Role,
-    messages: ~[Message],
-    last_read: Option<u64>,
-    next_id: u64
+    db: database::Handle
 }
 
 impl Buffer {
-    pub fn empty(id: u64, role: Role) -> Buffer {
+    pub fn create_repr(id: u64, role: Role, db: database::Handle) -> Buffer {
         Buffer {
             id: id,
-            messages: ~[],
-            last_read: None,
-            next_id: 0,
-            role: role
+            role: role,
+            db: db
         }
     }
 
-    pub fn add(&mut self, mut msg: Message, cb: |&Message|) -> u64 {
-        msg.id = self.next_id;
-        self.next_id += 1;
-        self.messages.push(msg);
-        cb(self.messages.last().unwrap());
-        self.next_id - 1
+    pub fn add(&mut self, msg: Message, cb: |Message|) {
+        let msg = self.db.create_message(self.id, msg);
+        cb(msg);
     }
 
-    pub fn set_last_read(&mut self, last_read: u64) {
-        self.last_read = Some(last_read);
+    pub fn fetch_message_range(&mut self, count: uint, before_id: Option<u64>) -> ~[Message] {
+        match before_id {
+            Some(id) => self.db.fetch_messages_before(self.id, id, count),
+            None     => self.db.fetch_latest_messages(self.id, count)
+        }
     }
 }

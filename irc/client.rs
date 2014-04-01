@@ -52,6 +52,10 @@ impl Connection {
         self.send([bytes!("PRIVMSG "), target, bytes!(" :"), message])
     }
 
+    pub fn send_quit(&mut self, message: &[u8]) -> IoResult<()> {
+        self.send([bytes!("QUIT :"), message])
+    }
+
     pub fn take_stream(self) -> tcp::TcpStream {
         self.stream
     }
@@ -86,6 +90,15 @@ impl Client {
             Ok(c) => self.run(c),
             Err(e) => self.pipe.as_ref().unwrap().send(ConnectionError(e))
         }
+    }
+
+    pub fn disconnect(&mut self) {
+        if self.conn_out.is_none() {
+            println!("irc.client: tried to disconnect without connection active");
+            return;
+        }
+
+        // Whoops, can't do anything! I may have mentioned Rust's crappy Socket API.
     }
 
     fn run(&mut self, conn: Connection) {
@@ -149,6 +162,12 @@ impl Client {
 
     pub fn pong(&mut self, recipient: &[u8]) {
         self.with_conn(|c| { c.send_pong(recipient) } );
+    }
+
+    pub fn quit(&mut self, msg: &[u8]) {
+        self.with_conn(|c| {
+            c.send_quit(msg)
+        });
     }
 }
 

@@ -14,6 +14,8 @@ message RemoteCommand {
     Disconnect = 205;
     GetNetworkConfiguration = 206;
     SetNetworkConfiguration = 207;
+    /* Buffer */
+    GetMessageRange = 300;
   };
 
   required Type packet_type = 1;
@@ -26,6 +28,7 @@ message RemoteCommand {
   optional JoinChannelT join_channel = 7;
   optional SendPrivmsgT send_privmsg = 8;
   optional SetNetworkConfigurationT set_network_configuration = 9;
+  optional GetMessageRangeT get_message_range = 10;
 }
 
 message AttachSessionT {
@@ -50,6 +53,11 @@ message SetNetworkConfigurationT {
   required string nickname = 2;
 }
 
+message GetMessageRangeT {
+  required uint32 count = 1;
+  optional uint64 before_id = 2;
+}
+
 message RemoteMessage {
   enum Type {
     /* Remote control */
@@ -67,6 +75,7 @@ message RemoteMessage {
     Information = 305;
     Join = 306;
     Privmsg = 307;
+    MessageRange = 308;
   };
 
   required Type packet_type = 1;
@@ -86,6 +95,7 @@ message RemoteMessage {
   optional JoinT join = 13;
   optional PrivmsgT privmsg = 14;
   optional NetworkConfigurationT network_configuration = 15;
+  repeated MessageRangeT message_range = 16;
 }
 
 message NetworkListT {
@@ -142,4 +152,12 @@ message PrivmsgT {
 message NetworkConfigurationT {
   required string server = 1;
   required string nickname = 2;
+}
+
+message MessageRangeT {
+  required uint64 id = 1;
+  required uint64 time = 2;
+  optional InformationT information = 3;
+  optional JoinT join = 4;
+  optional PrivmsgT privmsg = 5;
 }

@@ -2,8 +2,10 @@ use collections::HashMap;
 use std;
 use network;
 use envelope::Envelope;
+use database;
 
 pub struct Session {
+    db: database::Handle,
     networks: HashMap<u64, network::Network>,
     message_tx: Sender<Envelope<msg::Message>>,
     command_rx: Receiver<Envelope<msg::Command>>
@@ -26,10 +28,12 @@ pub mod msg {
 }
 
 impl Session {
-    pub fn new() -> (Session, Sender<Envelope<msg::Command>>, Receiver<Envelope<msg::Message>>) {
+    pub fn new(db: database::Handle) ->
+            (Session, Sender<Envelope<msg::Command>>, Receiver<Envelope<msg::Message>>) {
         let (message_tx, message_rx) = channel();
         let (command_tx, command_rx) = channel();
         (Session {
+            db: db,
             networks: HashMap::new(),
             message_tx: message_tx,
             command_rx: command_rx

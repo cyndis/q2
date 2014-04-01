@@ -290,8 +290,10 @@ fn parse_remote_packet(packet: ~[u8], tag: u64) -> Option<Envelope<msg::Command>
             }
         },
         protocol::Disconnect => {
-            println!("disconnect unimplemented");
-            None
+            match cmd.network_id {
+                Some(nid) => Some(SC(NC(nid, network::msg::Disconnect))),
+                _ => None
+            }
         }
         protocol::JoinChannel => {
             match (cmd.network_id, cmd.join_channel) {
@@ -316,14 +318,20 @@ fn parse_remote_packet(packet: ~[u8], tag: u64) -> Option<Envelope<msg::Command>
         protocol::SetNetworkConfiguration => {
             match (cmd.network_id, cmd.set_network_configuration) {
                 (Some(nid), Some(protocol::SetNetworkConfigurationT { server: Some(server), nickname: Some(nickname) })) =>
-                    match from_str(server) { Some(server) => Some(SC(NC(nid, network::msg::SetConfiguration(server, nickname)))),
-                                             None => None },
+                    Some(SC(NC(nid, network::msg::SetConfiguration(network::Configuration { server: server, nickname: nickname })))),
                 _ => None
             }
         },
         protocol::GetNetworkConfiguration => {
             match cmd.network_id {
                 Some(nid) => Some(SC(NC(nid, network::msg::GetConfiguration))),
+                _ => None
+            }
+        },
+        protocol::GetMessageRange => {
+            match (cmd.network_id, cmd.buffer_id, cmd.get_message_range) {
+                (Some(nid), Some(bid), Some(protocol::GetMessageRangeT { count: Some(count), before_id })) =>
+                    Some(SC(NC(nid, network::msg::GetBufferMessageRange(bid, count as uint, before_id)))),
                 _ => None
             }
         }
@@ -455,7 +463,7 @@ fn pack_remote_packet(msg: Envelope<msg::Message>) -> ~[u8] {
                                     pmsg.set_packet_type(protocol::Join);
                                     pmsg.set_join(protocol::JoinT { who: Some(who) });
                                 },
-                                buffer::Message(who, msg) => {
+                                buffer::Privmsg(who, msg) => {
                                     pmsg.set_packet_type(protocol::Privmsg);
                                     pmsg.set_privmsg(protocol::PrivmsgT { who: Some(who), msg: Some(msg) });
                                 }
@@ -464,6 +472,31 @@ fn pack_remote_packet(msg: Envelope<msg::Message>) -> ~[u8] {
                         network::msg::Configuration(config) => {
                             pmsg.set_packet_type(protocol::NetworkConfiguration);
                             pmsg.network_configuration = netconfig_to_pbuf(config);
+                        },
+                        network::msg::BufferMessageRange(bid, msgs) => {
+                            pmsg.set_packet_type(protocol::MessageRange);
+                            pmsg.set_buffer_id(bid);
+
+                            for msg in msgs.move_iter() {
+                                let mut ppmsg = protocol::MessageRangeT {
+                                    id: Some(msg.id),
+                                    time: Some(msg.time_ns),
+                                    information: None,
+                                    join: None,
+                                    privmsg: None
+                                };
+
+                                match msg.contents {
+                                    buffer::Information(m) => ppmsg.information =
+                                        Some(protocol::InformationT { msg: Some(m) }),
+                                    buffer::Join(who) => ppmsg.join =
+                                        Some(protocol::JoinT { who: Some(who) }),
+                                    buffer::Privmsg(who, m) => ppmsg.privmsg =
+                                        Some(protocol::PrivmsgT { who: Some(who), msg: Some(m) }),
+                                }
+
+                                pmsg.add_message_range(ppmsg);
+                            }
                         }
                     }
                 }
