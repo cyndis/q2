@@ -194,7 +194,7 @@ impl RemoteControl {
                         // New remote added, spin again
                         let (rx, stream, tag) = match wakeup.recv_opt() {
                             Some(x) => x,
-                            None    => { println!("!!! remotecontrol: wakeup is dead? !!!"); continue; }
+                            None    => { println!("!!! remotecontrol: wakeup is dead? !!!"); return; }
                         };
                         remotes.push(RemoteData { rx: rx, stream: stream, session_id: None, tag: tag });
                     },
@@ -202,7 +202,7 @@ impl RemoteControl {
                         // Handle received message from session with id
                         let msg = match sessions.get(&session_id).rx.recv_opt() {
                             Some(x) => x,
-                            None    => { println!("!!! remotecontrol: session is dead? !!!"); continue; }
+                            None    => { println!("!!! remotecontrol: session is dead? !!!"); return; }
                         };
                         let tag = msg.remote_tag;
                         let packet = pack_remote_packet(msg.encapsulate(msg::SessionMessage));
@@ -443,10 +443,11 @@ fn pack_remote_packet(msg: Envelope<msg::Message>) -> ~[u8] {
                         },
                         network::msg::BufferList(data) => {
                             pmsg.set_packet_type(protocol::BufferList);
-                            for (bufid, role) in data.move_iter() {
+                            for (bufid, role, db_count) in data.move_iter() {
                                 pmsg.add_buffer_list(protocol::BufferListT {
                                     id: Some(bufid),
-                                    role: Some(role_to_pbuf(role))
+                                    role: Some(role_to_pbuf(role)),
+                                    stored_messages: Some(db_count)
                                 });
                             }
                         },

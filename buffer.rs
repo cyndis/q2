@@ -86,14 +86,16 @@ mod memory {
 pub struct Buffer {
     id: u64,
     role: Role,
+    stored_messages: u64,
     db: database::Handle
 }
 
 impl Buffer {
-    pub fn create_repr(id: u64, role: Role, db: database::Handle) -> Buffer {
+    pub fn create_repr(id: u64, role: Role, stored_messages: u64, db: database::Handle) -> Buffer {
         Buffer {
             id: id,
             role: role,
+            stored_messages: stored_messages,
             db: db
         }
     }
@@ -101,6 +103,7 @@ impl Buffer {
     pub fn add(&mut self, msg: Message, cb: |Message|) {
         let msg = self.db.create_message(self.id, msg);
         cb(msg);
+        self.stored_messages += 1;
     }
 
     pub fn fetch_message_range(&mut self, count: uint, before_id: Option<u64>) -> ~[Message] {

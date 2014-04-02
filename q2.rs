@@ -31,7 +31,7 @@ fn main() {
     remote.run();
     remote.listen(from_str("0.0.0.0:9006").unwrap());*/
 
-    let mut db = database::Database::open(~":memory:").ok().expect("Failed to open database");
+    let mut db = database::Database::open(~"database.db").ok().expect("Failed to open database");
     db.create_tables();
     db.bootstrap();
 

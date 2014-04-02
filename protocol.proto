@@ -125,6 +125,7 @@ message BufferRole {
 message BufferListT {
   required uint64 id = 1;
   required BufferRole role = 2;
+  required uint64 stored_messages = 3;
 }
 
 message NewBufferT {

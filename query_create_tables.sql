@@ -53,3 +53,6 @@ CREATE TABLE IF NOT EXISTS message_privmsg(
 
     FOREIGN KEY(message_id) REFERENCES message(id)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS message_information_index ON message_information(message_id);
+CREATE UNIQUE INDEX IF NOT EXISTS message_join_index ON message_join(message_id);
+CREATE UNIQUE INDEX IF NOT EXISTS message_privmsg_index ON message_privmsg(message_id);

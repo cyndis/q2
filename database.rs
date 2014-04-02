@@ -129,7 +129,7 @@ fn load_session(db: &mut sqlite3::Database, handle: Handle, id: u64, session: &m
 
 fn load_buffers(db: &mut sqlite3::Database, handle: Handle, nid: u64, network: &mut network::Network) {
     let cursor = db.prepare(
-        "SELECT id, role, name FROM buffer WHERE network_id = ?;", &None
+        include_str!("query_load_buffers.sql"), &None
         ).unwrap();
     cursor.bind_param(1, &sqlite3::Integer64(nid as i64));
 
@@ -137,6 +137,7 @@ fn load_buffers(db: &mut sqlite3::Database, handle: Handle, nid: u64, network: &
         let buffer_id = cursor.get_i64(0) as u64;
         let role = cursor.get_int(1);
         let name = cursor.get_text(2);
+        let stored = cursor.get_i64(3);
 
         let role = match role {
             0 => buffer::Status,
@@ -145,7 +146,7 @@ fn load_buffers(db: &mut sqlite3::Database, handle: Handle, nid: u64, network: &
             _ => fail!("Invalid value in role enumeration in database")
         };
 
-        let buffer = buffer::Buffer::create_repr(buffer_id, role, handle.clone());
+        let buffer = buffer::Buffer::create_repr(buffer_id, role, stored as u64, handle.clone());
         network.buffers.push(buffer);
     }
 }
@@ -163,17 +164,20 @@ impl Handle {
                 ).unwrap();
             cursor.bind_param(1, &sqlite3::Integer64(nid as i64));
             match role {
-                buffer::Status => { cursor.bind_param(2, &sqlite3::Integer(0)); },
+                buffer::Status => { cursor.bind_param(2, &sqlite3::Integer(0));
+                                    cursor.bind_param(3, &sqlite3::Text(~"")); },
                 buffer::Channel(ref n) => { cursor.bind_param(2, &sqlite3::Integer(1));
                                             cursor.bind_param(3, &sqlite3::Text(n.clone())); },
                 buffer::Query(ref n) => { cursor.bind_param(2, &sqlite3::Integer(2));
                                           cursor.bind_param(3, &sqlite3::Text(n.clone())); },
             }
-            // FIXME error checking
-            cursor.step();
+            let err = cursor.step();
+            if err != sqlite3::SQLITE_DONE {
+                fail!("Buffer insertion failed ({}): {}", err, db.db.get_errmsg());
+            }
             // Clone of role is superfluous :( can be removed once we get update and get mutexes
             // ^ FIXME
-            buffer::Buffer::create_repr(db.db.get_last_insert_rowid() as u64, role.clone(), self.clone())
+            buffer::Buffer::create_repr(db.db.get_last_insert_rowid() as u64, role.clone(), 0, self.clone())
         })
     }
 

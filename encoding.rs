@@ -23,12 +23,15 @@ pub trait IrcEncoding {
 
 impl IrcEncoding for ~[u8] {
     fn irc_lowercase(&self) -> ~[u8] {
+        self.clone()
+        /*
         self.iter().map(|&b| {
             match b {
                 0x5B..0x5E | 0x61..0x7A => b + 32,
                 _                       => b
             }
         }).collect()
+        */
     }
 
     fn irc_equal(&self, other: &~[u8]) -> bool {

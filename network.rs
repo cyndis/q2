@@ -128,6 +128,7 @@ impl Network {
                         match from_str(config.server) {
                             Some(server) => {
                                 self.state = NetworkConnecting;
+                                self.nickname = Some(en.encode(&config.nickname));
                                 client.connect(server);
                                 client.register(en.encode(&config.nickname),
                                                 en.encode(&config.nickname),
@@ -155,7 +156,8 @@ impl Network {
                 reply(bare.copy_with(msg::Success));
             },
             msg::GetBufferList => {
-                let data = self.buffers.iter().map(|buf| (buf.id, buf.role.clone())).collect();
+                let data = self.buffers.iter().map(|buf|
+                    (buf.id, buf.role.clone(), buf.stored_messages)).collect();
                 reply(bare.copy_with(msg::BufferList(data)));
             },
             msg::SetConfiguration(cfg) => {
@@ -219,7 +221,7 @@ pub mod msg {
         Connected,
         NewBuffer(u64, buffer::Role),
         BufferMessage(u64, buffer::Message),
-        BufferList(~[(u64, buffer::Role)]),
+        BufferList(~[(u64, buffer::Role, u64)]),
         Error(~str),
         Success,
         Configuration(Option<super::Configuration>),

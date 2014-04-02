@@ -43,7 +43,7 @@ pub struct RawMessage {
 pub fn parse_message_raw(message: &[u8]) -> Option<RawMessage> {
     let mut prefix = None;
     let mut command = None;
-    let mut parameters = ~[];
+    let mut parameters: ~[~[u8]] = ~[];
     let mut trailing = false;
 
     let mut iter = message.split(|&b| b == ' ' as u8).enumerate();
@@ -52,6 +52,13 @@ pub fn parse_message_raw(message: &[u8]) -> Option<RawMessage> {
             Some(x) => x,
             None    => break
         };
+
+        if token.len() == 0 {
+            if trailing {
+                parameters.mut_last().unwrap().push(' ' as u8);
+            }
+            continue;
+        }
 
         if token[0] == ':' as u8 {
             if index == 0 {
